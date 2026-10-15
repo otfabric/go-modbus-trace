@@ -184,3 +184,24 @@ func TestInputsCLI(t *testing.T) {
 		t.Error("the input was changed")
 	}
 }
+
+type brokenPipe struct{ n int }
+
+func (b *brokenPipe) Write(p []byte) (int, error) {
+	if b.n <= 0 {
+		return 0, os.ErrClosed
+	}
+	b.n--
+	return len(p), nil
+}
+
+// TestWriteErrors: a report printed line by line fails the command when
+// its output goes away (a closed pipe), instead of exiting 0.
+func TestWriteErrors(t *testing.T) {
+	for _, args := range [][]string{{"summary", plant}, {"export", "mbcap", plant, "-o", filepath.Join(t.TempDir(), "x.mbcap")}} {
+		var errw bytes.Buffer
+		if code := run(context.Background(), args, bytes.NewReader(nil), &brokenPipe{n: 1}, &errw, false); code != exitError {
+			t.Errorf("%v: exit %d with a broken stdout", args[0], code)
+		}
+	}
+}

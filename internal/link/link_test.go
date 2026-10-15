@@ -182,16 +182,32 @@ func TestDefragHostile(t *testing.T) {
 		t.Errorf("%d order entries for %d datagrams", len(f.order), len(f.m))
 	}
 
-	// An IPv6 packet whose fragment headers nest: refused, not looped.
+	// An IPv6 packet whose atomic fragment headers (offset 0, no more
+	// fragments) nest: each completes at once, and the chain is bounded
+	// like other extension headers.
 	ip := make([]byte, 40, 40+8*20)
 	ip[0], ip[6] = 0x60, 44
-	for range 20 {
-		ip = append(ip, 44, 0, 0, 1, 0, 0, 0, 1) // more fragments, next header: another fragment header
+	for i := range 20 {
+		next := byte(44)
+		if i == 19 {
+			next = 6
+		}
+		ip = append(ip, next, 0, 0, 0, 0, 0, 0, byte(i))
 	}
 	ip[4], ip[5] = 0, byte(8*20)
 	var s Segment
-	if r := NewDecoder(1<<20).Decode(LinkRaw, ip, &s); r != ExtHeaders && r != FragmentHeld && r != FragmentBad {
-		t.Errorf("nested fragment headers: %v", r)
+	dec := NewDecoder(1 << 20)
+	if r := dec.Decode(LinkRaw, ip, &s); r != ExtHeaders || !dec.Fragment {
+		t.Errorf("nested fragment headers: %v, fragment %v", r, dec.Fragment)
+	}
+
+	// An IPv4 fragment names its datagram.
+	v4 := []byte{0x45, 0, 0, 28, 0x12, 0x34, 0x20, 0, 64, 6, 0, 0, 10, 0, 0, 1, 10, 0, 0, 2, 1, 2, 3, 4, 5, 6, 7, 8}
+	if r := dec.Decode(LinkRaw, v4, &s); r != FragmentHeld || !dec.Fragment || dec.Frag.ID != 0x1234 {
+		t.Errorf("IPv4 fragment: %v %+v", r, dec.Frag)
+	}
+	if dec.Decode(LinkRaw, []byte{0x45, 0, 0, 20, 0, 0, 0, 0, 64, 17, 0, 0, 10, 0, 0, 1, 10, 0, 0, 2}, &s); dec.Fragment {
+		t.Error("a whole datagram is not a fragment")
 	}
 }
 

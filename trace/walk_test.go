@@ -6,11 +6,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/otfabric/go-modbus-trace/internal/link"
 	"github.com/otfabric/go-modbus-trace/model"
 	"github.com/otfabric/go-modbus-trace/trace/tracetest"
 )
@@ -159,5 +162,106 @@ func TestWalkStops(t *testing.T) {
 	}
 	if s := OpenReader(bytes.NewReader(nil)); s.Size() != -1 || s.Name() != "-" {
 		t.Errorf("stream size %d name %q", s.Size(), s.Name())
+	}
+}
+
+// fragTrace is one connection whose writes go out as IP fragments.
+func fragTrace(t *testing.T) []byte {
+	t.Helper()
+	data, _ := build(t, tracetest.Options{}, func(b *tracetest.Builder) {
+		c := b.Conn(tracetest.ConnOptions{})
+		for i := range 4 {
+			c.Write(tracetest.ToServer, tracetest.WriteOpts{Fragment: 8}, tracetest.Frame{TID: uint16(i), Unit: 1, PDU: tracetest.ReadRequest(3, 0, 1)})
+			c.Response(uint16(i), 1, tracetest.RegistersResponse(3, uint16(i)))
+		}
+		c.Close()
+	})
+	return data
+}
+
+// TestWalkFragments: the fragments of a datagram reach fn with its
+// connection, also under a fragment budget so small that datagrams are let
+// go, and an error from fn at any packet ends the walk with that error.
+func TestWalkFragments(t *testing.T) {
+	data := fragTrace(t)
+	var all, attributed int
+	err := Walk(context.Background(), OpenReader(bytes.NewReader(data)), ScanOptions{}, func(p *RawPacket) error {
+		all++
+		if p.Conn != 0 {
+			attributed++
+		}
+		return nil
+	})
+	if err != nil || all == 0 || attributed != all {
+		t.Fatalf("%v: %d packets, %d attributed", err, all, attributed)
+	}
+	tight := ScanOptions{Limits: Limits{FragmentBudget: heldFragOverhead + 30}}
+	n := 0
+	if err := Walk(context.Background(), OpenReader(bytes.NewReader(data)), tight, func(*RawPacket) error { n++; return nil }); err != nil || n != all {
+		t.Errorf("tight budget: %v, %d of %d packets", err, n, all)
+	}
+	stop := errors.New("stop")
+	for k := 1; k <= all; k++ {
+		for _, o := range []ScanOptions{{}, tight} {
+			i := 0
+			err := Walk(context.Background(), OpenReader(bytes.NewReader(data)), o, func(*RawPacket) error {
+				if i++; i == k {
+					return stop
+				}
+				return nil
+			})
+			if !errors.Is(err, stop) {
+				t.Fatalf("error at packet %d: %v", k, err)
+			}
+		}
+	}
+}
+
+// TestHeldFrags: the holding of fragments keeps its budget, forgets
+// finished datagrams, and gives back the unfinished ones in file order.
+func TestHeldFrags(t *testing.T) {
+	h := &heldFrags{max: 3 * (heldFragOverhead + 10), m: map[link.FragKey]*heldDatagram{}}
+	key := func(i int) link.FragKey { return link.FragKey{ID: uint32(i)} }
+	pkt := func(f uint64) *RawPacket { return &RawPacket{Frame: f, Data: make([]byte, 10)} }
+	var out []*RawPacket
+	for i := range 4 {
+		out = append(out, h.hold(key(i), pkt(uint64(10-i)))...)
+	}
+	if len(out) != 1 || out[0].Frame != 10 || h.used != 3*(heldFragOverhead+10) {
+		t.Fatalf("let go %d, used %d", len(out), h.used)
+	}
+	for i := 100; i < 300; i++ { // finished datagrams leave no order entries
+		h.hold(key(i), pkt(uint64(i)))
+		h.take(key(i))
+	}
+	if len(h.order) > 2*len(h.m)+64 || h.take(key(99)) != nil {
+		t.Errorf("%d order entries for %d datagrams", len(h.order), len(h.m))
+	}
+	var frames []uint64
+	if err := h.flush(func(p *RawPacket) error { frames = append(frames, p.Frame); return nil }); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(frames) != "[7 8]" || len(h.m) != 0 { // frame 9 was let go when the 200 others came
+		t.Errorf("flushed %v", frames)
+	}
+	h.hold(key(1), pkt(1))
+	if err := h.flush(func(*RawPacket) error { return io.ErrClosedPipe }); !errors.Is(err, io.ErrClosedPipe) {
+		t.Errorf("flush error: %v", err)
+	}
+}
+
+// TestOpenErrors: no input, and a frame reference to a file the trace
+// does not have.
+func TestOpenErrors(t *testing.T) {
+	if _, err := OpenFiles(); !errors.Is(err, ErrNoInput) {
+		t.Errorf("no input: %v", err)
+	}
+	pa, _ := twoFiles(t)
+	f, err := Open(pa)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Frames([]model.FrameRef{{Frame: 1, Part: 3}}); !errors.Is(err, ErrFrameRef) {
+		t.Errorf("foreign reference: %v", err)
 	}
 }
