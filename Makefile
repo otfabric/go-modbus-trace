@@ -1,4 +1,4 @@
-.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets fuzz bench build check clean
+.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets static fuzz soak bench build check clean
 
 # Prefer module-local dependency resolution when a sibling go.work exists.
 export GOWORK := off
@@ -27,9 +27,13 @@ GOFMT_CI = $(shell GOTOOLCHAIN=go$(GO_MOD_VERSION).0 go env GOROOT)/bin/gofmt
 # Every target of REQUIREMENTS.md "Programs" builds with CGO_ENABLED=0 (L19).
 TARGETS = linux/amd64 linux/arm64 linux/arm darwin/arm64 darwin/amd64 windows/amd64 windows/arm64
 
-# Fuzz targets and the time each gets in `make fuzz` (added from L1 on).
+# Fuzz targets and the time each gets in `make fuzz`.
 FUZZ_TIME ?= 30s
-FUZZ_TARGETS =
+FUZZ_TARGETS = ./internal/pcapio:FuzzPcapReader ./internal/pcapio:FuzzPcapngReader ./internal/link:FuzzLinkIPTCP \
+	./mbtcp:FuzzFramer ./trace:FuzzPipeline
+
+# Size of the generated stream in `make soak`, GiB.
+SOAK_GIB ?= 5
 
 all: check build ## Run checks and build bin/mbtracectl
 
@@ -52,6 +56,9 @@ fuzz: ## Run every fuzz target for FUZZ_TIME
 		echo "Fuzzing $$name in $$pkg for $(FUZZ_TIME)"; \
 		go test -run '^$$' -fuzz "^$$name$$" -fuzztime $(FUZZ_TIME) $$pkg || exit 1; \
 	done
+
+soak: ## Stream SOAK_GIB GiB of generated trace through Scan and check that memory stays flat
+	@MBTRACE_SOAK=$(SOAK_GIB) go test -count=1 -run TestSoak -v -timeout 60m ./trace
 
 bench: ## Run benchmarks
 	@go test -run '^$$' -bench . -benchmem ./...
@@ -85,6 +92,14 @@ targets: ## Cross-build every package for every target with CGO_ENABLED=0
 	@for t in $(TARGETS); do \
 		echo "Building $$t"; \
 		GOOS=$${t%/*} GOARCH=$${t#*/} GOARM=7 CGO_ENABLED=0 go build ./... || exit 1; \
+	done
+
+static: ## Build mbtracectl for the Linux gateways and check that it is statically linked
+	@mkdir -p $(BIN_DIR)
+	@for a in amd64 arm64 arm; do \
+		GOOS=linux GOARCH=$$a GOARM=7 CGO_ENABLED=0 go build -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(APP_NAME)-linux-$$a $(CMD_PKG) || exit 1; \
+		file $(BIN_DIR)/$(APP_NAME)-linux-$$a | grep -q 'statically linked' || { file $(BIN_DIR)/$(APP_NAME)-linux-$$a; exit 1; }; \
+		echo "$(APP_NAME)-linux-$$a: static"; \
 	done
 
 build: ## Build $(BINARY) (static)

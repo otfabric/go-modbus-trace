@@ -166,6 +166,19 @@ Here, *changed values* counts, per target, every FC01-04 register or coil whose 
 - `Makefile`: the go-modbus-capture targets, plus `mod-check` (no `replace`) and `targets` (`CGO_ENABLED=0 go build ./...` for the seven targets), both in `make check`.
 - `.github/workflows/ci.yml`: the organisation's `go-ci.yml@v2`, as go-modbus-capture uses it, plus a job per target on a runner of its own architecture. linux/arm (v7) is cross-compiled on the arm64 runner and not executed (question Q2). `release.yml` follows in L1, when `cmd/mbtracectl` exists to be released.
 
+## D9. L1: what the implementation settled (2026-10-15)
+
+- **Frame numbers follow Wireshark exactly.** tshark 4.6.9 numbers pcapng Custom Blocks (`0x0BAD`, `0x40000BAD`) and systemd Journal Export Blocks as frames; Name Resolution, Decryption Secrets and unknown blocks it does not. The reader counts the same blocks (without returning them), so a frame number in an event is the one Wireshark shows. Checked against tshark in `internal/pcapio` (skipped where tshark is absent).
+- **Midstream start uses the peer's first ACK**, not its latest (the spike used the latest): a later ACK may already cover bytes the capture lost, which then disappeared without a gap. Found by the random ground-truth test.
+- **The ACK-based gap is declared lazily**: only when data waits behind the hole (held segments, or a later segment arriving). Without data behind it nothing is declared, so a capture where an ACK copy is stamped before its data (two taps, `-i any`) loses nothing.
+- **Held data is never a keepalive**: a one-byte copy drained from the out-of-order buffer looked like a probe. **First data wins among held segments** too: a conflicting copy held behind a hole was delivered before the original. Both found by the random ground-truth test.
+- **The framer settles before it drops**: at a gap or the end of the stream it decides a pending resync candidate (a cut-off next header counts if its protocol ID bytes are 0 and its length plausible) and a pending foreign-frame decision, and it waits for the function code byte of a split header. Three bugs of this kind were found by the random test and the fuzzer.
+- **Snap-length cuts keep framing in sync**: the flow stage reports the cut as an exact gap, so a truncated ADU is reported with what was captured and the next one is framed normally.
+- **Types**: `FileSummary` and `Flow` live in package `trace` in L1; `model` starts in L2 with the event types and their JSON Schemas (L22). The framer (`mbtcp.Framer`) is provenance-agnostic: it works on stream positions, and L2 maps them to frames.
+- **CLI**: cobra as modbusctl, exit codes 0/1/2 as mbcapctl (REQUIREMENTS L18 names both; the explicit codes win), every flag also from `MBTRACECTL_<FLAG>`, progress on stderr only when it is a terminal. Several input files as one continuous trace moves to L3, where the exports need it.
+- **Lint fix**: the L0 `depguard` rule for go-modbus was a prefix and matched this module (`go-modbus-trace`) and go-modbus-capture; it is now exact (`$`) plus go-modbus's subpackages. Checked: go-modbus is refused, go-modbus-capture is allowed.
+- **Tests use the standard library only**; testify was not needed.
+
 ## Open questions for the user
 
 - **Q1. CLI name.** Keep `mbtracectl`? **Answered 2026-10-15: yes, `mbtracectl`.**
