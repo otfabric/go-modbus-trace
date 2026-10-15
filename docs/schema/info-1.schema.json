@@ -1,0 +1,545 @@
+{
+  "$defs": {
+    "mbtracectl.flowCounts": {
+      "additionalProperties": false,
+      "properties": {
+        "modbus_tcp": {
+          "type": "integer"
+        },
+        "tcp": {
+          "type": "integer"
+        },
+        "tls": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "modbus_tcp",
+        "tcp",
+        "tls"
+      ],
+      "type": "object"
+    },
+    "mbtracectl.infoDoc": {
+      "additionalProperties": false,
+      "properties": {
+        "schema_version": {
+          "type": "integer"
+        },
+        "traces": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/mbtracectl.infoJSON"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "schema_version",
+        "traces"
+      ],
+      "type": "object"
+    },
+    "mbtracectl.infoJSON": {
+      "additionalProperties": false,
+      "properties": {
+        "flows": {
+          "$ref": "#/$defs/mbtracectl.flowCounts"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/trace.FileSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "flows",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "trace.ConnCounters": {
+      "additionalProperties": false,
+      "properties": {
+        "evicted": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_tracked": {
+          "type": "integer"
+        },
+        "midstream": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "packets_after_close": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "superseded": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "evicted",
+        "max_tracked",
+        "midstream",
+        "packets_after_close",
+        "superseded",
+        "total"
+      ],
+      "type": "object"
+    },
+    "trace.FileSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "capture_drops": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "connections": {
+          "$ref": "#/$defs/trace.ConnCounters"
+        },
+        "error": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "first": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "fragments": {
+          "$ref": "#/$defs/trace.Fragments"
+        },
+        "gzip": {
+          "type": "boolean"
+        },
+        "input_bytes": {
+          "type": "integer"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/trace.Input"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interfaces": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/trace.Interface"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "internal_errors": {
+          "items": {
+            "$ref": "#/$defs/trace.InternalError"
+          },
+          "type": "array"
+        },
+        "last": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "quality": {
+          "$ref": "#/$defs/trace.Quality"
+        },
+        "reader": {
+          "$ref": "#/$defs/trace.ReaderCounters"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/trace.Section"
+          },
+          "type": "array"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "snaplen": {
+          "$ref": "#/$defs/trace.Snaplen"
+        },
+        "time_backwards": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transaction_flags": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "transactions": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "unsupported": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "bytes",
+        "connections",
+        "file",
+        "format",
+        "fragments",
+        "gzip",
+        "input_bytes",
+        "inputs",
+        "interfaces",
+        "packets",
+        "quality",
+        "reader",
+        "sha256",
+        "snaplen",
+        "time_backwards",
+        "unsupported"
+      ],
+      "type": "object"
+    },
+    "trace.Fragments": {
+      "additionalProperties": false,
+      "properties": {
+        "dropped": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "incomplete": {
+          "type": "integer"
+        },
+        "reassembled": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dropped",
+        "incomplete",
+        "reassembled"
+      ],
+      "type": "object"
+    },
+    "trace.Input": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "gzip": {
+          "type": "boolean"
+        },
+        "input_bytes": {
+          "type": "integer"
+        },
+        "packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "format",
+        "gzip",
+        "input_bytes",
+        "packets",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "trace.Interface": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "drops": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "link": {
+          "type": "string"
+        },
+        "link_type": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "part": {
+          "type": "integer"
+        },
+        "section": {
+          "type": "integer"
+        },
+        "snaplen": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tsresol": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "link",
+        "link_type",
+        "packets",
+        "part",
+        "section",
+        "snaplen",
+        "tsresol"
+      ],
+      "type": "object"
+    },
+    "trace.InternalError": {
+      "additionalProperties": false,
+      "properties": {
+        "frame": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame",
+        "message"
+      ],
+      "type": "object"
+    },
+    "trace.Quality": {
+      "additionalProperties": false,
+      "properties": {
+        "foreign_protocol": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "gap_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "gaps": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "junk_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "keepalives": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "out_of_order": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "overlap_conflict": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reassembly_budget": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reassembly_overflow": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resync_failed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resyncs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retransmitted": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snaplen_truncated": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "syn_retransmits": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "foreign_protocol",
+        "gap_bytes",
+        "gaps",
+        "junk_bytes",
+        "keepalives",
+        "out_of_order",
+        "overlap_conflict",
+        "reassembly_budget",
+        "reassembly_overflow",
+        "resync_failed",
+        "resyncs",
+        "retransmitted",
+        "snaplen_truncated",
+        "syn_retransmits"
+      ],
+      "type": "object"
+    },
+    "trace.ReaderCounters": {
+      "additionalProperties": false,
+      "properties": {
+        "other_frames": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "simple_packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "skipped_blocks": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated_tail": {
+          "type": "boolean"
+        },
+        "unknown_blocks": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "other_frames",
+        "simple_packets",
+        "skipped_blocks",
+        "truncated_tail",
+        "unknown_blocks"
+      ],
+      "type": "object"
+    },
+    "trace.Section": {
+      "additionalProperties": false,
+      "properties": {
+        "application": {
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "hardware": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "part": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "part"
+      ],
+      "type": "object"
+    },
+    "trace.Snaplen": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "payload_bytes_cut": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated_packets": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max",
+        "payload_bytes_cut",
+        "truncated_packets"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/info-1.schema.json",
+  "$ref": "#/$defs/mbtracectl.infoDoc",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The file summary and flow counts of each input.",
+  "title": "mbtracectl info --json"
+}

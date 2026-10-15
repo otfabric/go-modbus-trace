@@ -58,6 +58,7 @@ const (
 // Packet is one packet record. Data is valid until the next call to Next.
 type Packet struct {
 	Frame    uint64 // 1-based over all packet records, as Wireshark numbers frames
+	Part     uint16 // index of the input file (set by the caller; the reader reads one)
 	Offset   int64  // start of the record or block in the uncompressed stream
 	Iface    uint32 // index into Interfaces (all sections); 0 for classic pcap
 	TimeNS   int64  // capture time, UTC nanoseconds since the Unix epoch

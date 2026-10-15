@@ -105,6 +105,7 @@
       "additionalProperties": false,
       "required": ["frame", "offset", "interface", "payload_offset", "payload_length"],
       "properties": {
+        "part": {"$ref": "#/$defs/u16", "description": "index of the input file, when there are several"},
         "frame": {"type": "integer", "minimum": 1},
         "offset": {"$ref": "#/$defs/u64"},
         "interface": {"$ref": "#/$defs/u32"},

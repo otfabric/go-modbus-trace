@@ -3,7 +3,10 @@
 `--json` (or `MBTRACECTL_JSON=1`) makes `mbtracectl` write one indented JSON document to stdout. Every
 document carries `schema_version` (1). Field names are snake_case and stable; a change is called out in the
 release notes. Times are RFC 3339 with nanoseconds, UTC. Endpoints are `ip:port` (IPv6 in brackets).
-JSON Schemas follow in L4 (`docs/schema/`).
+Each document has a JSON Schema in [`schema/`](schema/) (draft 2020-12): `info-1`, `flows-1`, `summary-1`,
+`export-report-1`, `extract-1`, `version-1`, and `file-summary-1` for the library's `trace.FileSummary`. They
+are generated from the Go types (`make golden`); a test fails when one is out of date and validates the real
+output of every command against its schema.
 
 ## `info`
 
@@ -60,7 +63,7 @@ The meaning of every counter is in `ARCHITECTURE.md` sections 4 to 7 and 11.
 ## `version`
 
 ```json
-{"build_date": "...", "commit": "...", "tag": "v0.1.0", "version": "0.1.0"}
+{"schema_version": 1, "version": "0.1.0", "tag": "v0.1.0", "commit": "...", "build_date": "..."}
 ```
 
 ## `summary`
@@ -69,19 +72,46 @@ The meaning of every counter is in `ARCHITECTURE.md` sections 4 to 7 and 11.
 {
   "schema_version": 1,
   "selection": "fc=3",
-  "summary": {"...": "as in info, plus:", "transactions": {"ok": 1325, "orphan_response": 1, "unanswered": 1},
-              "transaction_flags": {"midstream": 1327, "role_guessed": 1327}},
-  "devices": [{
-    "server": "10.0.0.2:502", "unit": 1, "transactions": 4934,
-    "statuses": {"ok": 4834, "uncertain": 100}, "functions": {"3": 4934},
-    "clients": ["10.0.0.0", "10.0.0.4"], "first": "...", "last": "...", "max_latency_ns": 274000
-  }]
+  "summary": {"...": "the trace's FileSummary, as in info"},
+  "overview": {"transactions": 123, "connections": 2, "by_status": {"exception": 1, "ok": 122},
+               "by_function": {"3": 60, "4": 61, "43": 1, "6": 1}, "by_class": {"read": 122, "write": 1},
+               "flags": {}, "gaps": 0, "resyncs": 0, "first": "...", "last": "...", "duration_ns": 59024400000},
+  "devices": {"devices": [{"server": "10.0.0.2:502", "unit": 1, "transactions": 62,
+               "by_function": {"3": 60, "43": 1, "6": 1}, "by_status": {"ok": 62},
+               "clients": ["10.0.0.10"], "clients_overflow": 0, "first": "...", "last": "...",
+               "request_bytes": 743, "response_bytes": 1794,
+               "latency": {"count": 62, "min_ns": 100000, "p50_ns": 100000, "p95_ns": 100000, "p99_ns": 100000, "max_ns": 100000}}],
+              "overflow": 0},
+  "patterns": {"patterns": [{"client": "10.0.0.10", "server": "10.0.0.2:502", "unit": 1, "function": 3,
+               "request_pdu": "030000000a", "summary": "Read 10 holding registers @ 0", "count": 60,
+               "first": "...", "last": "...", "interval": {"count": 59, "p50_ns": 1000200000, "...": 0},
+               "jitter_ns": 1900388, "responses": 60, "changed": 59, "volatility": 1}],
+               "overflow": 0},
+  "coverage": [{"server": "10.0.0.2:502", "unit": 1, "space": "holding",
+                "read": [{"start": 0, "end": 9, "count": 60, "first": "...", "last": "..."}],
+                "written": [{"start": 5, "end": 5, "count": 1, "first": "...", "last": "..."}], "overflow": 0}]
 }
 ```
 
-`selection` is the canonical form of the selection flags (absent when everything is selected). `devices`
-are the server endpoints and units with at least one selected transaction, ordered by server and unit;
-`functions` counts by function code (decimal, as a string key).
+`selection` is the canonical form of the selection flags (absent when everything is selected); every analyzer
+sees only selected transactions. `devices` are the server endpoints and units, ordered by server and unit;
+`by_function` counts by function code (decimal, as a string key); latency quantiles are within about 1%.
+A pattern is one (client, server, unit, request PDU); `jitter_ns` is the median absolute deviation of its
+intervals and `volatility` the share of responses that differ from the one before. Coverage ranges are
+inclusive and merged when adjacent. Each analyzer has a cap (10,000 devices, 256 clients per device, 10,000
+patterns, 4,096 ranges per server, unit and space) and counts what it left out in `overflow`.
+
+## `export mbcap`
+
+With `--json` the export report is written to stdout (`--report FILE` writes the same document to a file).
+Its fields and warning codes are in [MBCAP-EXPORT.md](MBCAP-EXPORT.md) section 5; schema
+[`schema/export-report-1.schema.json`](schema/export-report-1.schema.json).
+
+## `extract`
+
+```json
+{"schema_version": 1, "packets": 130, "bytes": 9593, "connections": 1, "packets_without_time": 0}
+```
 
 ## `timeline --format jsonl`, `export timeline` to `.jsonl`
 

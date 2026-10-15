@@ -1,0 +1,350 @@
+{
+  "$defs": {
+    "mbcapexport.ReplayEstimate": {
+      "additionalProperties": false,
+      "properties": {
+        "changed_values": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "estimated_in_memory_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "samples": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "changed_values",
+        "estimated_in_memory_bytes",
+        "samples"
+      ],
+      "type": "object"
+    },
+    "mbcapexport.Report": {
+      "additionalProperties": false,
+      "properties": {
+        "capture_library": {
+          "type": "string"
+        },
+        "change_only_dropped": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "excluded": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "format": {
+          "type": "string"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/mbcapexport.ReportInput"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "library": {
+          "type": "string"
+        },
+        "quality": {
+          "$ref": "#/$defs/mbcapexport.ReportQuality"
+        },
+        "replay": {
+          "$ref": "#/$defs/mbcapexport.ReplayEstimate"
+        },
+        "samples_written": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "selection": {
+          "type": "string"
+        },
+        "targets": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/mbcapexport.TargetReport"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tick_ns": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transactions_seen": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wall_start": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "warnings": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/mbcapexport.Warning"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "capture_library",
+        "change_only_dropped",
+        "excluded",
+        "format",
+        "inputs",
+        "library",
+        "quality",
+        "replay",
+        "samples_written",
+        "schema_version",
+        "selection",
+        "targets",
+        "tick_ns",
+        "transactions_seen",
+        "wall_start",
+        "warnings"
+      ],
+      "type": "object"
+    },
+    "mbcapexport.ReportInput": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "first": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "last": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "packets",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "mbcapexport.ReportQuality": {
+      "additionalProperties": false,
+      "properties": {
+        "capture_drops": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "gaps": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resyncs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retransmitted": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snaplen_truncated": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "capture_drops",
+        "gaps",
+        "resyncs",
+        "retransmitted",
+        "snaplen_truncated"
+      ],
+      "type": "object"
+    },
+    "mbcapexport.StreamReport": {
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "type": "string"
+        },
+        "id": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "samples": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "client",
+        "id",
+        "samples"
+      ],
+      "type": "object"
+    },
+    "mbcapexport.TargetReport": {
+      "additionalProperties": false,
+      "properties": {
+        "by_function": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "exceptions": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "first": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "id": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        },
+        "last": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "role_source": {
+          "type": "string"
+        },
+        "samples": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "server": {
+          "type": "string"
+        },
+        "streams": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/mbcapexport.StreamReport"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "by_function",
+        "exceptions",
+        "id",
+        "label",
+        "role_source",
+        "samples",
+        "server",
+        "streams",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "mbcapexport.Warning": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last_read_time": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "space": {
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "target": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "text": {
+          "type": "string"
+        },
+        "write_time": {
+          "format": "date-time",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "text"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/export-report-1.schema.json",
+  "$ref": "#/$defs/mbcapexport.Report",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "mbcapexport.Report (MBCAP-EXPORT.md section 5); mbtracectl export mbcap --report and --json.",
+  "title": "MBCAP export report"
+}
