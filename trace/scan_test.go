@@ -78,7 +78,7 @@ func run(t *testing.T, data []byte, o ScanOptions, servers ...netip.AddrPort) re
 			Truncated: a.Flags&mbtcp.Truncated != 0, Resynced: a.Flags&mbtcp.Resynced != 0})
 	}
 	var err error
-	r.sum, r.flows, err = scan(context.Background(), OpenReader(bytes.NewReader(data)), o, hook)
+	r.sum, r.flows, err = scan(context.Background(), OpenReader(bytes.NewReader(data)), o, hook, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
