@@ -1,0 +1,194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/event-1.schema.json",
+  "title": "go-modbus-trace event",
+  "description": "One event of trace.Analyze (package model), as JSON. Exactly one payload (conn, txn, gap, resync, note) is present; conn.open and conn.close carry conn.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["kind", "seq"],
+  "properties": {
+    "kind": {"enum": ["conn.open", "conn.close", "txn", "gap", "resync", "trace.note"]},
+    "seq": {"type": "integer", "minimum": 1},
+    "time": {"$ref": "#/$defs/time"},
+    "conn": {"$ref": "#/$defs/connection"},
+    "txn": {"$ref": "#/$defs/transaction"},
+    "gap": {"$ref": "#/$defs/gap"},
+    "resync": {"$ref": "#/$defs/resync"},
+    "note": {"$ref": "#/$defs/note"}
+  },
+  "oneOf": [
+    {"properties": {"kind": {"enum": ["conn.open", "conn.close"]}}, "required": ["conn"]},
+    {"properties": {"kind": {"const": "txn"}}, "required": ["txn"]},
+    {"properties": {"kind": {"const": "gap"}}, "required": ["gap"]},
+    {"properties": {"kind": {"const": "resync"}}, "required": ["resync"]},
+    {"properties": {"kind": {"const": "trace.note"}}, "required": ["note"]}
+  ],
+  "$defs": {
+    "time": {"type": "string", "format": "date-time"},
+    "endpoint": {"type": "string", "description": "ip:port, IPv6 in brackets"},
+    "hex": {"type": "string", "pattern": "^([0-9a-f]{2})*$"},
+    "u8": {"type": "integer", "minimum": 0, "maximum": 255},
+    "u16": {"type": "integer", "minimum": 0, "maximum": 65535},
+    "u32": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+    "u64": {"type": "integer", "minimum": 0},
+    "pair": {"type": "array", "items": {"$ref": "#/$defs/u64"}, "minItems": 2, "maxItems": 2},
+    "flags": {
+      "type": "array",
+      "items": {"enum": ["retransmitted", "out_of_order", "gap_adjacent", "resynced", "snaplen_truncated", "midstream",
+        "role_guessed", "role_unknown", "retried", "clock_order", "slow", "invalid_pdu", "serial_function_over_tcp",
+        "unknown_function", "broadcast", "foreign_protocol"]}
+    },
+    "connection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "client", "server", "role_source", "role_confidence", "open", "interface", "packets", "bytes", "transactions"],
+      "properties": {
+        "id": {"$ref": "#/$defs/u32"},
+        "client": {"$ref": "#/$defs/endpoint"},
+        "server": {"$ref": "#/$defs/endpoint"},
+        "role_source": {"enum": ["override", "syn", "port", "structure", "unknown"]},
+        "role_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "open": {"enum": ["syn", "midstream"]},
+        "close": {"enum": ["fin", "rst", "end_of_trace", "evicted", "superseded"]},
+        "first": {"$ref": "#/$defs/time"},
+        "last": {"$ref": "#/$defs/time"},
+        "interface": {"$ref": "#/$defs/u32"},
+        "multiple_interfaces": {"type": "boolean"},
+        "packets": {"$ref": "#/$defs/pair", "description": "client to server, server to client"},
+        "bytes": {"$ref": "#/$defs/pair", "description": "TCP payload bytes, client to server, server to client"},
+        "transactions": {"$ref": "#/$defs/u64"}
+      }
+    },
+    "range": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["space", "start", "count"],
+      "properties": {
+        "space": {"enum": ["coil", "discrete", "holding", "input", "file", "fifo"]},
+        "file": {"$ref": "#/$defs/u16"},
+        "start": {"$ref": "#/$defs/u16"},
+        "count": {"$ref": "#/$defs/u16"},
+        "write": {"type": "boolean"}
+      }
+    },
+    "field": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "offset", "length"],
+      "properties": {
+        "name": {"type": "string"},
+        "offset": {"type": "integer", "minimum": 7, "description": "byte offset in the ADU; the MBAP header is bytes 0..6"},
+        "length": {"type": "integer", "minimum": 1},
+        "value": {"$ref": "#/$defs/u64"},
+        "hex": {"$ref": "#/$defs/hex"}
+      }
+    },
+    "view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["function", "name", "known", "class"],
+      "properties": {
+        "function": {"type": "integer", "minimum": 0, "maximum": 127},
+        "name": {"type": "string"},
+        "known": {"type": "boolean"},
+        "exception": {"type": "boolean"},
+        "exception_code": {"$ref": "#/$defs/u8"},
+        "sub": {"$ref": "#/$defs/u16"},
+        "class": {"enum": ["read", "write", "other"]},
+        "ranges": {"type": "array", "items": {"$ref": "#/$defs/range"}},
+        "fields": {"type": "array", "items": {"$ref": "#/$defs/field"}},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "frame_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frame", "offset", "interface", "payload_offset", "payload_length"],
+      "properties": {
+        "frame": {"type": "integer", "minimum": 1},
+        "offset": {"$ref": "#/$defs/u64"},
+        "interface": {"$ref": "#/$defs/u32"},
+        "time": {"$ref": "#/$defs/time"},
+        "payload_offset": {"type": "integer", "minimum": -1},
+        "payload_length": {"type": "integer", "minimum": 1}
+      }
+    },
+    "adu": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tid", "unit", "size", "refs"],
+      "properties": {
+        "tid": {"$ref": "#/$defs/u16"},
+        "unit": {"$ref": "#/$defs/u8"},
+        "pdu": {"$ref": "#/$defs/hex"},
+        "size": {"type": "integer", "minimum": 7, "maximum": 260},
+        "view": {"$ref": "#/$defs/view"},
+        "refs": {"type": ["array", "null"], "items": {"$ref": "#/$defs/frame_ref"}},
+        "first": {"$ref": "#/$defs/time"},
+        "last": {"$ref": "#/$defs/time"},
+        "flags": {"$ref": "#/$defs/flags"}
+      }
+    },
+    "transaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["seq", "conn", "client", "server", "unit", "tid", "function", "class", "status", "summary"],
+      "properties": {
+        "seq": {"type": "integer", "minimum": 1},
+        "conn": {"$ref": "#/$defs/u32"},
+        "client": {"$ref": "#/$defs/endpoint"},
+        "server": {"$ref": "#/$defs/endpoint"},
+        "unit": {"$ref": "#/$defs/u8"},
+        "tid": {"$ref": "#/$defs/u16"},
+        "function": {"type": "integer", "minimum": 0, "maximum": 127},
+        "sub": {"$ref": "#/$defs/u16"},
+        "class": {"enum": ["read", "write", "other"]},
+        "ranges": {"type": "array", "items": {"$ref": "#/$defs/range"}},
+        "request": {"$ref": "#/$defs/adu"},
+        "response": {"$ref": "#/$defs/adu"},
+        "status": {"enum": ["ok", "exception", "unanswered", "orphan_response", "ambiguous", "malformed", "uncertain"]},
+        "exception": {"$ref": "#/$defs/u8"},
+        "latency_ns": {"type": "integer", "minimum": 0},
+        "flags": {"$ref": "#/$defs/flags"},
+        "warnings": {"type": "array", "items": {"type": "string"}},
+        "summary": {"type": "string"}
+      },
+      "anyOf": [{"required": ["request"]}, {"required": ["response"]}]
+    },
+    "gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conn", "dir", "pos", "bytes", "reason"],
+      "properties": {
+        "conn": {"$ref": "#/$defs/u32"},
+        "dir": {"enum": ["c2s", "s2c"]},
+        "pos": {"$ref": "#/$defs/u64"},
+        "bytes": {"type": "integer", "minimum": -1},
+        "reason": {"enum": ["loss", "snaplen", "reassembly_overflow", "reassembly_budget", "resync_failed", "incomplete"]}
+      }
+    },
+    "resync": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["conn", "dir", "pos", "skipped", "confidence"],
+      "properties": {
+        "conn": {"$ref": "#/$defs/u32"},
+        "dir": {"enum": ["c2s", "s2c"]},
+        "pos": {"$ref": "#/$defs/u64"},
+        "skipped": {"type": "integer", "minimum": 0},
+        "confidence": {"enum": ["next_header", "run_end"]}
+      }
+    },
+    "note": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "text"],
+      "properties": {
+        "code": {"enum": ["capture_drops", "snaplen", "unsupported", "damaged_file", "internal_error"]},
+        "interface": {"$ref": "#/$defs/u32"},
+        "count": {"$ref": "#/$defs/u64"},
+        "text": {"type": "string"}
+      }
+    }
+  }
+}

@@ -179,6 +179,17 @@ Here, *changed values* counts, per target, every FC01-04 register or coil whose 
 - **Lint fix**: the L0 `depguard` rule for go-modbus was a prefix and matched this module (`go-modbus-trace`) and go-modbus-capture; it is now exact (`$`) plus go-modbus's subpackages. Checked: go-modbus is refused, go-modbus-capture is allowed.
 - **Tests use the standard library only**; testify was not needed.
 
+## D10. L2: what the implementation settled (2026-10-15)
+
+- **Pairing decides gap-swallowed requests early.** A request whose response direction had a gap is `unanswered` and `uncertain` as soon as a request sent after it is answered. Before this, a 5 GiB soak's live heap grew with the trace (91 MiB at 5 GiB, 24 at 1 GiB) because every lost response held its request until the connection ended; after, 11 MiB at 5 GiB.
+- **The timeline's reorder buffer is bounded in bytes too** (64 MiB of encoded rows, besides the 60 s window): on a 1 GiB trace with 2.5 M transactions the window alone held about 200,000 events, 1 GiB of memory; now 173 MiB peak.
+- **`--server` and `--client`** select in the analysing commands and also feed the role decision (ARCHITECTURE section 11 used the names for both purposes).
+- **TID reuse** with a different PDU while the first request is outstanding is `ambiguous` (section 9), not `unanswered` (REQUIREMENTS L8 lists reuse under `unanswered`); the one left outstanding at the end is `unanswered`. Section 9 is followed; L8's wording is read as "the earlier request was never answered".
+- **Unknown roles**: such connections are not paired; every ADU is an `uncertain` transaction with the new flag `role_unknown` (section 10's list gained it).
+- **Schema now, not at L4**: `docs/schema/event-1.schema.json` exists from L2 because the definition of done ties every `model` change to the schema; tests validate events and check the schema covers every field. The other schemas (summary, flows, analyzers, report, CLI JSON) stay L4 (L22).
+- **LA6 without privileges**: a go-modbus v1.7.1 client and server on loopback through a recording proxy (TESTING.md's bridge) give real frames for every function the client supports; the decode equals the client API's values. A tcpdump fixture would need privileges; none is committed.
+- **Throughput**: `Analyze` runs at about 140 MiB/s on an M1 core (L23 asks for 100 MB/s); the decoder allocates a field list per ADU, the first place to look at L4.
+
 ## Open questions for the user
 
 - **Q1. CLI name.** Keep `mbtracectl`? **Answered 2026-10-15: yes, `mbtracectl`.**

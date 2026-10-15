@@ -103,7 +103,7 @@ MBTRACECTL_SERVER_PORT=502,1502). A flag on the command line wins.`,
 	}
 	root.PersistentFlags().BoolVar(&e.json, "json", false, "write JSON (docs/json-output.md) instead of text")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageErr("%v", err) })
-	root.AddCommand(infoCommand(e), flowsCommand(e), versionCommand(e))
+	root.AddCommand(infoCommand(e), flowsCommand(e), summaryCommand(e), timelineCommand(e), exportCommand(e), versionCommand(e))
 	return root
 }
 

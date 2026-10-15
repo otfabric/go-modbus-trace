@@ -28,13 +28,13 @@ const maxInternalErrors = 100
 // A damaged file ends the scan with the results so far and an error
 // wrapping ErrCorrupt. Cancelling ctx stops it between packets.
 func Scan(ctx context.Context, f *File, o ScanOptions) (*FileSummary, []Flow, error) {
-	return scan(ctx, f, o, nil)
+	return scan(ctx, f, o, nil, nil)
 }
 
 // aduHook sees every framed ADU (tests).
 type aduHook func(c *flow.Conn, dir int, a *mbtcp.ADU)
 
-func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook) (*FileSummary, []Flow, error) {
+func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook, an *analysis) (*FileSummary, []Flow, error) {
 	rc, err := f.open()
 	if err != nil {
 		return nil, nil, err
@@ -52,7 +52,7 @@ func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook) (*FileSumma
 	if name != "-" {
 		name = filepath.Base(name)
 	}
-	sc := &scanner{o: o, lim: lim, hook: hook, sum: &FileSummary{File: name, Format: rd.Format().String(), Gzip: rd.Gzip(),
+	sc := &scanner{o: o, lim: lim, hook: hook, an: an, sum: &FileSummary{File: name, Format: rd.Format().String(), Gzip: rd.Gzip(),
 		Unsupported: map[string]uint64{}}}
 	dec := link.NewDecoder(lim.FragmentBudget)
 	tr := flow.NewTracker(flow.Limits{MaxConns: lim.MaxConns, BufferPerDir: lim.BufferPerDir, BufferTotal: lim.BufferTotal,
@@ -87,6 +87,9 @@ func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook) (*FileSumma
 		if p.HasTime {
 			t := p.TimeNS
 			if s.First == nil || t < s.First.UnixNano() {
+				if s.First == nil && an != nil && an.o.FirstPacket != nil {
+					an.o.FirstPacket(time.Unix(0, t).UTC())
+				}
 				s.First = tm(t)
 			}
 			if s.Last == nil || t > s.Last.UnixNano() {
@@ -98,6 +101,9 @@ func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook) (*FileSumma
 			lastNS = t
 		}
 		sc.packet(dec, tr, &p, &seg)
+		if an != nil && an.err != nil {
+			return sc.sum, nil, an.err
+		}
 		if o.Progress != nil && rd.InputBytes() >= nextProg {
 			o.Progress(rd.InputBytes(), f.Size())
 			nextProg = rd.InputBytes() + 4<<20
@@ -105,6 +111,12 @@ func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook) (*FileSumma
 	}
 	tr.Finish()
 	sc.finish(rd, dec, tr)
+	if an != nil {
+		an.notes(sc.sum)
+		if an.err != nil {
+			return sc.sum, nil, an.err
+		}
+	}
 	if readErr != nil {
 		return sc.sum, sc.flows, fmt.Errorf("%s: %w", f.Name(), readErr)
 	}
@@ -117,6 +129,7 @@ func tm(ns int64) *time.Time {
 }
 
 type scanner struct {
+	an    *analysis
 	hook  aduHook
 	o     ScanOptions
 	lim   Limits
@@ -191,6 +204,7 @@ func hexSum(b [32]byte) string { return hex.EncodeToString(b[:]) }
 
 // connState is the scan state of one connection.
 type connState struct {
+	a       *aconn // analysis, when Analyze runs and the flow is selected
 	c       *flow.Conn
 	sc      *scanner
 	fr      [2]*mbtcp.Framer
@@ -217,6 +231,9 @@ func (s dirSink) ADU(a *mbtcp.ADU) {
 	if cs.sc.hook != nil {
 		cs.sc.hook(cs.c, s.d, a)
 	}
+	if cs.a != nil {
+		cs.a.adu(s.d, a)
+	}
 	ds.units++
 	if a.Flags&mbtcp.Truncated != 0 {
 		cs.sc.q.SnaplenTruncated++
@@ -238,12 +255,18 @@ func (s dirSink) ADU(a *mbtcp.ADU) {
 	}
 }
 
-func (s dirSink) Resync(uint64, int, mbtcp.Confidence) {
+func (s dirSink) Resync(pos uint64, skipped int, c mbtcp.Confidence) {
+	if s.cs.a != nil {
+		s.cs.a.resync(s.d, pos, skipped, c)
+	}
 	s.cs.dirs[s.d].resyncs++
 	s.cs.sc.q.Resyncs++
 }
 
-func (s dirSink) Junk(_ uint64, n int, why mbtcp.JunkReason) {
+func (s dirSink) Junk(pos uint64, n int, why mbtcp.JunkReason) {
+	if s.cs.a != nil {
+		s.cs.a.junk(s.d, pos, n, why)
+	}
 	ds := &s.cs.dirs[s.d]
 	ds.units++
 	ds.run = 0
@@ -260,11 +283,14 @@ func (sc *scanner) Open(c *flow.Conn) {
 	for d := range 2 {
 		cs.fr[d] = mbtcp.NewFramer(sc.lim.ResyncScan, dirSink{cs, d})
 	}
+	if sc.an != nil {
+		cs.a = sc.an.open(c)
+	}
 	c.User = cs
 }
 
 // Data implements flow.Handler.
-func (sc *scanner) Data(c *flow.Conn, d int, pos uint64, b []byte, _ flow.Chunk) {
+func (sc *scanner) Data(c *flow.Conn, d int, pos uint64, b []byte, ch flow.Chunk) {
 	cs := c.User.(*connState)
 	ds := &cs.dirs[d]
 	if !ds.first {
@@ -274,6 +300,9 @@ func (sc *scanner) Data(c *flow.Conn, d int, pos uint64, b []byte, _ flow.Chunk)
 	if ds.tls {
 		return // TLS: Modbus/TCP Security is not decodable
 	}
+	if cs.a != nil {
+		cs.a.data(d, pos, len(b), ch)
+	}
 	cs.fr[d].Write(pos, b)
 }
 
@@ -281,6 +310,9 @@ func (sc *scanner) Data(c *flow.Conn, d int, pos uint64, b []byte, _ flow.Chunk)
 func (sc *scanner) Gap(c *flow.Conn, d int, pos uint64, n int64, kind flow.GapKind) {
 	cs := c.User.(*connState)
 	cs.fr[d].Gap(pos, n, kind == flow.GapSnaplen)
+	if cs.a != nil {
+		cs.a.gap(d, pos, n, kind.String())
+	}
 }
 
 // Close implements flow.Handler.
@@ -289,6 +321,9 @@ func (sc *scanner) Close(c *flow.Conn) {
 	c.User = nil
 	for d := range 2 {
 		cs.fr[d].Close()
+	}
+	if cs.a != nil {
+		cs.a.close()
 	}
 	role := mbtcp.DecideRole(mbtcp.RoleInput{Endpoints: c.Endpoints, SYNFrom: c.SYNFrom, SYNACKFrom: c.SYNACKFrom,
 		ServerPorts: sc.o.ServerPorts, Servers: sc.o.Servers, Clients: sc.o.Clients, Samples: cs.samples})

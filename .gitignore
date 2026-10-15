@@ -9,8 +9,8 @@
 .DS_Store
 
 # Coverage reports
-coverage.*
-cover.*
+/coverage.*
+/cover.*
 
 # Fuzz cache written by go test -fuzz outside testdata
 /fuzz/
