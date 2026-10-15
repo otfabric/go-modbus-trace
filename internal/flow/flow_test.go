@@ -182,3 +182,9 @@ func TestHostileHolding(t *testing.T) {
 		}
 	})
 }
+
+func TestNamesOutOfRange(t *testing.T) {
+	if Close(200).String() != "unknown" || GapKind(200).String() != "unknown" || CloseFIN.String() != "fin" || GapLoss.String() != "loss" {
+		t.Errorf("%q %q", Close(200), GapKind(200))
+	}
+}

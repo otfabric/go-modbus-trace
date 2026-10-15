@@ -6,10 +6,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -480,4 +482,104 @@ func TestMoreWarnings(t *testing.T) {
 			t.Errorf("gap warning for a window without the gap: %+v", w)
 		}
 	}
+}
+
+// failWriter fails at one stage of writing.
+type failWriter struct{ at string }
+
+var errDisk = errors.New("disk full")
+
+func (w failWriter) fail(s string) error {
+	if w.at == s {
+		return errDisk
+	}
+	return nil
+}
+func (w failWriter) WriteTarget(capture.Target) error { return w.fail("target") }
+func (w failWriter) WriteStream(capture.Stream) error { return w.fail("stream") }
+func (w failWriter) WriteSample(capture.Sample) error { return w.fail("sample") }
+func (w failWriter) Close(capture.End) error          { return w.fail("close") }
+
+// TestErrors: invalid options, a writer that fails at each stage (an I/O
+// error, not ErrWriter), and the checker refusing a target, a stream and a
+// sample (ErrWriter: a bug the exporter must never cause).
+func TestErrors(t *testing.T) {
+	data := build(t, func(b *tracetest.Builder) {
+		c := b.Conn(tracetest.ConnOptions{})
+		c.Request(1, 1, tracetest.ReadRequest(3, 0, 1))
+		c.Response(1, 1, tracetest.RegistersResponse(3, 1))
+	})
+	f := func() *trace.File { return trace.OpenReader(bytes.NewReader(data)) }
+	open := func(w capture.Writer) Open { return func(capture.Header) (capture.Writer, error) { return w, nil } }
+	for _, eo := range []Options{{}, {Producer: "x", TickNS: capture.MaxTickNS + 1}} {
+		if _, err := Export(context.Background(), f(), trace.Options{}, eo, open(failWriter{})); !errors.Is(err, ErrOptions) {
+			t.Errorf("%+v: %v", eo, err)
+		}
+	}
+	for _, at := range []string{"target", "stream", "sample", "close"} {
+		_, err := Export(context.Background(), f(), trace.Options{}, Options{Producer: "x"}, open(failWriter{at: at}))
+		if !errors.Is(err, errDisk) || errors.Is(err, ErrWriter) {
+			t.Errorf("writer failing at %s: %v", at, err)
+		}
+	}
+	if _, err := Export(context.Background(), f(), trace.Options{}, Options{Producer: "x"},
+		func(capture.Header) (capture.Writer, error) { return nil, errDisk }); !errors.Is(err, errDisk) {
+		t.Errorf("open: %v", err)
+	}
+
+	// The checker's refusals, provoked inside: they are ErrWriter.
+	refused := func(change func(x *exporter)) error {
+		sp, err := newSpool()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer sp.remove()
+		x := &exporter{eo: Options{Producer: "x", TickNS: capture.DefaultTickNS}, sp: sp, rep: newReport(),
+			targets: map[targetKey]*target{}, streams: map[streamKey]*stream{}, writes: map[targetKey][]write{}}
+		at := time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)
+		err = x.event(&model.Event{Kind: model.KindTxn, Txn: &model.Transaction{Conn: 1, Status: model.StatusOK, Function: 3, Class: "read",
+			Client: netip.MustParseAddrPort("10.0.0.1:40000"), Server: srv, Unit: 1,
+			Request:  &model.ADU{PDU: tracetest.ReadRequest(3, 0, 1), First: &at, Last: &at},
+			Response: &model.ADU{PDU: tracetest.RegistersResponse(3, 7), First: &at, Last: &at}}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		change(x)
+		if err := sp.flush(); err != nil {
+			t.Fatal(err)
+		}
+		_, err = x.write(&trace.FileSummary{First: &at, Last: &at}, open(failWriter{}))
+		return err
+	}
+	for name, change := range map[string]func(x *exporter){
+		"target": func(x *exporter) { x.tlist[0].ID = 0 },
+		"stream": func(x *exporter) { x.tlist[0].streams[0].Target = 99 },
+		"sample": func(x *exporter) {
+			_ = x.sp.add(x.tlist[0].streams[0].ID, time.Date(2026, 10, 15, 8, 0, 1, 0, time.UTC).UnixNano(), []byte{6, 0, 0, 0, 1}, []byte{6, 0, 0, 0, 1})
+		},
+		"header": func(x *exporter) { x.eo.Producer = strings.Repeat("p", 70000) },
+	} {
+		if err := refused(change); !errors.Is(err, ErrWriter) {
+			t.Errorf("checker refusing the %s: %v", name, err)
+		}
+	}
+}
+
+// TestQualityCounts: the flags that do not exclude are counted.
+func TestQualityCounts(t *testing.T) {
+	data := build(t, func(b *tracetest.Builder) {
+		c := b.Conn(tracetest.ConnOptions{})
+		c.Request(1, 1, tracetest.ReadRequest(3, 0, 1))
+		c.Request(1, 1, tracetest.ReadRequest(3, 0, 1)) // retried
+		b.Advance(2 * time.Second)                      // slow
+		c.Write(tracetest.ToClient, tracetest.WriteOpts{Seg: []int{5, 4}, Reverse: true}, tracetest.Frame{TID: 1, Unit: 1, PDU: tracetest.RegistersResponse(3, 1)})
+		c.Request(2, 1, tracetest.ReadRequest(3, 0, 1))
+		c.Write(tracetest.ToClient, tracetest.WriteOpts{Retransmit: []int{0}}, tracetest.Frame{TID: 2, Unit: 1, PDU: tracetest.RegistersResponse(3, 1)})
+	})
+	_, rep := export(t, data, Options{ChangeOnly: true}, "jsonl")
+	q := rep.Quality
+	if q.Retried == 0 || q.Slow == 0 || q.OutOfOrder == 0 || rep.ChangeOnlyDropped != 1 {
+		t.Errorf("quality %+v, change-only dropped %d", q, rep.ChangeOnlyDropped)
+	}
+	identity(t, rep)
 }
