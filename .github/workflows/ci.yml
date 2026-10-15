@@ -27,8 +27,8 @@ jobs:
   # Every target of REQUIREMENTS.md "Programs" builds and tests with
   # CGO_ENABLED=0 on a runner of its own architecture. Nothing is emulated (no
   # QEMU): linux/arm (v7) has no hosted runner, so it is cross-compiled on the
-  # arm64 runner and not executed (docs/DECISIONS.md). From L1 on, this job also
-  # builds cmd/mbtracectl and checks with `file` that the Linux binaries are static.
+  # arm64 runner and not executed (user decision, docs/DECISIONS.md Q2). Every
+  # Linux job checks with `file` that mbtracectl is statically linked.
   targets:
     name: Target ${{ matrix.os }}/${{ matrix.arch }}${{ matrix.goarm && 'v7' || '' }}
     strategy:
@@ -65,3 +65,22 @@ jobs:
       - name: Test
         if: matrix.test
         run: go test -count=1 ./...
+      - name: Static binary
+        if: matrix.os == 'linux'
+        run: |
+          go build -trimpath -o mbtracectl ./cmd/mbtracectl
+          file mbtracectl
+          file mbtracectl | grep -q 'statically linked'
+
+  # A time-boxed run of every fuzz target on pull requests (TESTING.md
+  # section 3); the seed corpora run in every test job.
+  fuzz:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: make fuzz FUZZ_TIME=30s
