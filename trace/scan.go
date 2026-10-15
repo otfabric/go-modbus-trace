@@ -35,82 +35,92 @@ func Scan(ctx context.Context, f *File, o ScanOptions) (*FileSummary, []Flow, er
 type aduHook func(c *flow.Conn, dir int, a *mbtcp.ADU)
 
 func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook, an *analysis) (*FileSummary, []Flow, error) {
-	rc, err := f.open()
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() { _ = rc.Close() }()
 	lim := o.Limits.withDefaults()
 	if o.ServerPorts == nil {
 		o.ServerPorts = DefaultServerPorts
 	}
-	rd, err := pcapio.NewReader(rc, pcapio.Options{MaxPacket: lim.MaxPacket})
-	if err != nil {
-		return nil, nil, err
-	}
-	name := f.Name()
-	if name != "-" {
-		name = filepath.Base(name)
-	}
-	sc := &scanner{o: o, lim: lim, hook: hook, an: an, sum: &FileSummary{File: name, Format: rd.Format().String(), Gzip: rd.Gzip(),
-		Unsupported: map[string]uint64{}}}
+	sc := &scanner{o: o, lim: lim, hook: hook, an: an, sum: &FileSummary{Unsupported: map[string]uint64{}}}
 	dec := link.NewDecoder(lim.FragmentBudget)
 	tr := flow.NewTracker(flow.Limits{MaxConns: lim.MaxConns, BufferPerDir: lim.BufferPerDir, BufferTotal: lim.BufferTotal,
 		TailKeep: flow.DefaultLimits.TailKeep}, sc)
-	done := ctx.Done()
 	var (
-		p        pcapio.Packet
-		seg      link.Segment
 		readErr  error
 		lastNS   int64
+		read     int64
 		nextProg int64 = 4 << 20
 	)
-	for {
-		select {
-		case <-done:
-			return nil, nil, ctx.Err()
-		default:
+	for i, pt := range f.parts {
+		rc, err := pt.open()
+		if err != nil {
+			return nil, nil, err
 		}
-		if err := rd.Next(&p); err != nil {
-			if !errors.Is(err, io.EOF) {
-				readErr = err
-				sc.sum.Error = err.Error()
+		rd, err := pcapio.NewReader(rc, pcapio.Options{MaxPacket: lim.MaxPacket})
+		if err != nil {
+			_ = rc.Close()
+			if len(f.parts) > 1 {
+				err = fmt.Errorf("%s: %w", pt.name(), err)
 			}
-			break
+			return nil, nil, err
 		}
-		s := sc.sum
-		s.Packets++
-		s.Bytes += uint64(len(p.Data))
-		if p.Truncated() {
-			s.Snaplen.TruncatedPackets++
-		}
-		if p.HasTime {
-			t := p.TimeNS
-			if s.First == nil || t < s.First.UnixNano() {
-				if s.First == nil && an != nil && an.o.FirstPacket != nil {
-					an.o.FirstPacket(time.Unix(0, t).UTC())
+		done := ctx.Done()
+		var p pcapio.Packet
+		var seg link.Segment
+		for {
+			select {
+			case <-done:
+				_ = rc.Close()
+				return nil, nil, ctx.Err()
+			default:
+			}
+			if err := rd.Next(&p); err != nil {
+				if !errors.Is(err, io.EOF) {
+					readErr = fmt.Errorf("%s: %w", pt.name(), err)
+					sc.sum.Error = readErr.Error()
 				}
-				s.First = tm(t)
+				break
 			}
-			if s.Last == nil || t > s.Last.UnixNano() {
-				s.Last = tm(t)
+			p.Part = uint16(i)
+			s := sc.sum
+			s.Packets++
+			s.Bytes += uint64(len(p.Data))
+			if p.Truncated() {
+				s.Snaplen.TruncatedPackets++
 			}
-			if lastNS != 0 && t < lastNS {
-				s.TimeBackwards++
+			if p.HasTime {
+				t := p.TimeNS
+				if s.First == nil || t < s.First.UnixNano() {
+					if s.First == nil && an != nil && an.o.FirstPacket != nil {
+						an.o.FirstPacket(time.Unix(0, t).UTC())
+					}
+					s.First = tm(t)
+				}
+				if s.Last == nil || t > s.Last.UnixNano() {
+					s.Last = tm(t)
+				}
+				if lastNS != 0 && t < lastNS {
+					s.TimeBackwards++
+				}
+				lastNS = t
 			}
-			lastNS = t
+			sc.packet(dec, tr, &p, &seg)
+			if an != nil && an.err != nil {
+				_ = rc.Close()
+				return sc.sum, nil, an.err
+			}
+			if o.Progress != nil && read+rd.InputBytes() >= nextProg {
+				o.Progress(read+rd.InputBytes(), f.Size())
+				nextProg = read + rd.InputBytes() + 4<<20
+			}
 		}
-		sc.packet(dec, tr, &p, &seg)
-		if an != nil && an.err != nil {
-			return sc.sum, nil, an.err
-		}
-		if o.Progress != nil && rd.InputBytes() >= nextProg {
-			o.Progress(rd.InputBytes(), f.Size())
-			nextProg = rd.InputBytes() + 4<<20
+		read += rd.InputBytes()
+		sc.finishPart(i, pt, rd)
+		_ = rc.Close()
+		if readErr != nil {
+			break // a damaged file ends the pass: what follows is not continuous
 		}
 	}
 	tr.Finish()
-	sc.finish(rd, dec, tr)
+	sc.finish(dec, tr)
 	if an != nil {
 		an.notes(sc.sum)
 		if an.err != nil {
@@ -118,7 +128,7 @@ func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook, an *analysi
 		}
 	}
 	if readErr != nil {
-		return sc.sum, sc.flows, fmt.Errorf("%s: %w", f.Name(), readErr)
+		return sc.sum, sc.flows, readErr
 	}
 	return sc.sum, sc.flows, nil
 }
@@ -154,30 +164,56 @@ func (sc *scanner) packet(dec *link.Decoder, tr *flow.Tracker, p *pcapio.Packet,
 	tr.Packet(p, seg)
 }
 
-func (sc *scanner) finish(rd *pcapio.Reader, dec *link.Decoder, tr *flow.Tracker) {
+// finishPart adds one input's facts to the summary.
+func (sc *scanner) finishPart(i int, pt *part, rd *pcapio.Reader) {
 	s := sc.sum
-	s.SHA256 = hexSum(rd.SHA256())
-	s.InputBytes = rd.InputBytes()
-	var drops uint64
-	anyDrops := false
-	for i, f := range rd.Interfaces() {
-		x := Interface{ID: i, Section: f.Section, LinkType: f.LinkType, Link: link.LinkName(f.LinkType), SnapLen: f.SnapLen,
+	name := pt.name()
+	if name != "-" {
+		name = filepath.Base(name)
+	}
+	in := Input{File: name, Format: rd.Format().String(), Gzip: rd.Gzip(), InputBytes: rd.InputBytes(), SHA256: hexSum(rd.SHA256())}
+	for j, f := range rd.Interfaces() {
+		x := Interface{ID: j, Part: i, Section: f.Section, LinkType: f.LinkType, Link: link.LinkName(f.LinkType), SnapLen: f.SnapLen,
 			TSResol: f.TSResol, Name: f.Name, Description: f.Description, Packets: f.Packets}
+		in.Packets += f.Packets
 		if f.Stats != nil && f.Stats.IfDrop != nil {
 			v := *f.Stats.IfDrop
 			x.Drops = &v
-			drops += v
-			anyDrops = true
+			if s.CaptureDrop == nil {
+				s.CaptureDrop = new(uint64)
+			}
+			*s.CaptureDrop += v
 		}
 		s.Snaplen.Max = max(s.Snaplen.Max, f.SnapLen)
 		s.Interfaces = append(s.Interfaces, x)
 	}
-	if anyDrops {
-		s.CaptureDrop = &drops
-	}
 	for _, sec := range rd.Sections() {
-		s.Sections = append(s.Sections, Section{Application: sec.Application, OS: sec.OS, Hardware: sec.Hardware, Comment: sec.Comment})
+		s.Sections = append(s.Sections, Section{Part: i, Application: sec.Application, OS: sec.OS, Hardware: sec.Hardware, Comment: sec.Comment})
 	}
+	c := rd.Counters()
+	r := &s.Reader
+	r.SimplePackets += c.SimplePackets
+	r.SkippedBlocks += c.SkippedBlocks
+	r.UnknownBlocks += c.UnknownBlocks
+	r.OtherFrames += c.OtherFrames
+	r.TruncatedTail = r.TruncatedTail || c.TruncatedTail
+	s.Inputs = append(s.Inputs, in)
+	// The top-level description: the input itself, or the inputs together.
+	if len(s.Inputs) == 1 {
+		s.File, s.Format, s.Gzip, s.InputBytes, s.SHA256 = in.File, in.Format, in.Gzip, in.InputBytes, in.SHA256
+	} else {
+		s.File += "," + in.File
+		if s.Format != in.Format {
+			s.Format = "mixed"
+		}
+		s.Gzip = s.Gzip || in.Gzip
+		s.InputBytes += in.InputBytes
+		s.SHA256 = "" // see Inputs
+	}
+}
+
+func (sc *scanner) finish(dec *link.Decoder, tr *flow.Tracker) {
+	s := sc.sum
 	for r := link.LinkUnsupported; r < link.NumReasons; r++ {
 		if n := dec.Counts[r]; n > 0 {
 			s.Unsupported[r.String()] = n
@@ -185,9 +221,6 @@ func (sc *scanner) finish(rd *pcapio.Reader, dec *link.Decoder, tr *flow.Tracker
 	}
 	fr := dec.Defrag()
 	s.Fragments = Fragments{Reassembled: fr.Datagrams, Dropped: fr.Dropped, Incomplete: fr.Pending}
-	c := rd.Counters()
-	s.Reader = ReaderCounters{SimplePackets: c.SimplePackets, SkippedBlocks: c.SkippedBlocks, UnknownBlocks: c.UnknownBlocks,
-		OtherFrames: c.OtherFrames, TruncatedTail: c.TruncatedTail}
 	st := tr.Stats
 	s.Connections = ConnCounters{Total: st.Conns, Midstream: st.Midstream, Evicted: st.Evicted, Superseded: st.Superseded,
 		MaxTracked: st.MaxTracked, AfterClose: st.AfterClose}

@@ -8,7 +8,6 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/otfabric/go-modbus-trace/analyze"
 	"github.com/otfabric/go-modbus-trace/export/timeline"
 	"github.com/otfabric/go-modbus-trace/mbtcp"
 	"github.com/otfabric/go-modbus-trace/model"
@@ -168,30 +168,28 @@ func (a *analyzeFlags) options(e *env, sel selection.Selection) (trace.Options, 
 	return trace.Options{ScanOptions: so, Slow: a.slow}, nil
 }
 
-// device aggregates the transactions of one server endpoint and unit.
-type device struct {
-	Server       string            `json:"server"`
-	Unit         uint8             `json:"unit"`
-	Transactions uint64            `json:"transactions"`
-	Statuses     map[string]uint64 `json:"statuses"`
-	Functions    map[string]uint64 `json:"functions"`
-	Clients      []string          `json:"clients"`
-	First        *time.Time        `json:"first,omitempty"`
-	Last         *time.Time        `json:"last,omitempty"`
-	MaxLatencyNS int64             `json:"max_latency_ns"`
-	clients      map[string]bool
+// summaryJSON is the JSON form of summary (docs/schema/summary-1.schema.json).
+type summaryJSON struct {
+	SchemaVersion int                      `json:"schema_version"`
+	Selection     string                   `json:"selection,omitempty"`
+	Summary       *trace.FileSummary       `json:"summary"`
+	Overview      *analyze.OverviewResult  `json:"overview"`
+	Devices       *analyze.DevicesResult   `json:"devices"`
+	Patterns      *analyze.PatternsResult  `json:"patterns"`
+	Coverage      []analyze.CoverageResult `json:"coverage"`
 }
 
 func summaryCommand(e *env) *cobra.Command {
 	var (
 		af  analyzeFlags
 		sf  selFlags
+		top int
 		sel selection.Selection
 	)
 	cmd := &cobra.Command{
-		Use:   "summary TRACE",
-		Short: "Summarise the Modbus traffic per server and unit: transactions by status and function, clients, latency",
-		Args:  args(1, 1),
+		Use:   "summary TRACE...",
+		Short: "Summarise the Modbus traffic: devices, poll patterns, address coverage, latency, quality",
+		Args:  args(1, -1),
 		RunE: func(cmd *cobra.Command, a []string) error {
 			var err error
 			if sel, err = sf.selection(); err != nil {
@@ -202,63 +200,30 @@ func summaryCommand(e *env) *cobra.Command {
 				return err
 			}
 			o.FirstPacket = sel.Resolve
-			f, err := open(e, a[0])
+			f, err := openInputs(e, a)
 			if err != nil {
 				return err
 			}
-			devs := map[string]*device{}
+			ov, dev, pat, cov := analyze.NewOverview(), analyze.NewDevices(), analyze.NewPatterns(), analyze.NewCoverage()
+			all := analyze.Tee(ov, dev, pat, cov)
 			sum, aerr := trace.Analyze(cmd.Context(), f, o, trace.SinkFunc(func(ev *model.Event) error {
-				t := ev.Txn
-				if t == nil || !sel.Match(t) {
+				if ev.Txn != nil && !sel.Match(ev.Txn) {
 					return nil
 				}
-				k := fmt.Sprintf("%s/%d", t.Server, t.Unit)
-				d := devs[k]
-				if d == nil {
-					d = &device{Server: t.Server.String(), Unit: t.Unit, Statuses: map[string]uint64{}, Functions: map[string]uint64{}, clients: map[string]bool{}}
-					devs[k] = d
+				if ev.Conn != nil && !sel.MatchConn(ev.Conn.ID, ev.Conn.Client, ev.Conn.Server) {
+					return nil
 				}
-				d.Transactions++
-				d.Statuses[t.Status]++
-				d.Functions[strconv.Itoa(int(t.Function))]++
-				d.clients[t.Client.Addr().String()] = true
-				if tt := t.Time(); tt != nil {
-					if d.First == nil || tt.Before(*d.First) {
-						d.First = tt
-					}
-					if d.Last == nil || tt.After(*d.Last) {
-						d.Last = tt
-					}
-				}
-				d.MaxLatencyNS = max(d.MaxLatencyNS, t.LatencyNS)
-				return nil
+				return all.Event(ev)
 			}))
 			if sum == nil {
 				return aerr
 			}
-			list := make([]*device, 0, len(devs))
-			for _, d := range devs {
-				for c := range d.clients {
-					d.Clients = append(d.Clients, c)
-				}
-				sort.Strings(d.Clients)
-				list = append(list, d)
-			}
-			sort.Slice(list, func(i, j int) bool {
-				if list[i].Server != list[j].Server {
-					return list[i].Server < list[j].Server
-				}
-				return list[i].Unit < list[j].Unit
-			})
+			out := summaryJSON{SchemaVersion: schemaVersion, Selection: sel.String(), Summary: sum, Overview: ov.Result(),
+				Devices: dev.Result(), Patterns: pat.Result(), Coverage: cov.Result()}
 			if e.json {
-				err = writeJSON(e.stdout, struct {
-					SchemaVersion int                `json:"schema_version"`
-					Selection     string             `json:"selection,omitempty"`
-					Summary       *trace.FileSummary `json:"summary"`
-					Devices       []*device          `json:"devices"`
-				}{schemaVersion, sel.String(), sum, list})
+				err = writeJSON(e.stdout, out)
 			} else {
-				err = printSummary(e.stdout, sum, list)
+				err = printSummary(e.stdout, &out, top)
 			}
 			if err != nil {
 				return err
@@ -268,26 +233,73 @@ func summaryCommand(e *env) *cobra.Command {
 	}
 	af.register(cmd)
 	sf.register(cmd)
+	cmd.Flags().IntVar(&top, "top", 10, "poll patterns to list in the text output")
 	return cmd
 }
 
-func printSummary(w io.Writer, s *trace.FileSummary, devs []*device) error {
-	_, _ = fmt.Fprintf(w, "%s: %d packets, %s to %s\n", s.File, s.Packets, ts(s.First), ts(s.Last))
-	_, _ = fmt.Fprintf(w, "transactions: %s\n", kv(s.Transactions))
-	if len(s.TransactionFlags) > 0 {
-		_, _ = fmt.Fprintf(w, "flags:        %s\n", kv(s.TransactionFlags))
+func dur(ns int64) string { return time.Duration(ns).Round(time.Microsecond).String() }
+
+func printSummary(w io.Writer, s *summaryJSON, top int) error {
+	f := s.Summary
+	_, _ = fmt.Fprintf(w, "%s: %d packets, %s to %s\n", f.File, f.Packets, ts(f.First), ts(f.Last))
+	_, _ = fmt.Fprintf(w, "transactions: %s\n", kv(s.Overview.ByStatus))
+	if len(s.Overview.Flags) > 0 {
+		_, _ = fmt.Fprintf(w, "flags:        %s\n", kv(s.Overview.Flags))
 	}
 	_, _ = fmt.Fprintln(w)
 	tw := tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "SERVER\tUNIT\tTXNS\tSTATUSES\tFUNCTIONS\tCLIENTS\tMAX LATENCY\tLAST")
-	for _, d := range devs {
-		_, _ = fmt.Fprintf(tw, "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", d.Server, d.Unit, d.Transactions, kv(d.Statuses),
-			kv(d.Functions), strings.Join(d.Clients, ","), time.Duration(d.MaxLatencyNS), ts(d.Last))
+	_, _ = fmt.Fprintln(tw, "SERVER\tUNIT\tTXNS\tSTATUSES\tFUNCTIONS\tCLIENTS\tLATENCY P50/P99/MAX\tLAST")
+	for _, d := range s.Devices.Devices {
+		lat := "-"
+		if l := d.Latency; l != nil {
+			lat = dur(l.P50NS) + "/" + dur(l.P99NS) + "/" + dur(l.MaxNS)
+		}
+		_, _ = fmt.Fprintf(tw, "%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\n", d.Server, d.Unit, d.Transactions, kv(d.ByStatus),
+			kv(d.ByFunction), strings.Join(d.Clients, ","), lat, ts(d.Last))
 	}
-	if len(devs) == 0 {
+	if len(s.Devices.Devices) == 0 {
 		_, _ = fmt.Fprintln(tw, "(no transactions)")
 	}
-	return tw.Flush()
+	_ = tw.Flush()
+	if n := min(top, len(s.Patterns.Patterns)); n > 0 {
+		_, _ = fmt.Fprintf(w, "\npoll patterns (%d of %d):\n", n, len(s.Patterns.Patterns))
+		tw = tabwriter.NewWriter(w, 0, 4, 2, ' ', 0)
+		_, _ = fmt.Fprintln(tw, "CLIENT\tSERVER\tUNIT\tREQUEST\tCOUNT\tINTERVAL P50\tJITTER\tVOLATILITY")
+		for _, p := range s.Patterns.Patterns[:n] {
+			iv := "-"
+			if p.Interval != nil {
+				iv = dur(p.Interval.P50NS)
+			}
+			_, _ = fmt.Fprintf(tw, "%s\t%s\t%d\t%s\t%d\t%s\t%s\t%.2f\n", p.Client, p.Server, p.Unit, p.Summary, p.Count, iv, dur(p.JitterNS), p.Volatility)
+		}
+		_ = tw.Flush()
+	}
+	if len(s.Coverage) > 0 {
+		_, _ = fmt.Fprintln(w, "\naddresses read (written):")
+		for _, c := range s.Coverage {
+			_, _ = fmt.Fprintf(w, "  %s unit %d %s: %s", c.Server, c.Unit, c.Space, ranges(c.Read))
+			if len(c.Written) > 0 {
+				_, _ = fmt.Fprintf(w, " (%s)", ranges(c.Written))
+			}
+			_, _ = fmt.Fprintln(w)
+		}
+	}
+	return nil
+}
+
+func ranges(ivs []analyze.Interval) string {
+	if len(ivs) == 0 {
+		return "-"
+	}
+	var p []string
+	for _, iv := range ivs {
+		if iv.Start == iv.End {
+			p = append(p, strconv.Itoa(int(iv.Start)))
+		} else {
+			p = append(p, fmt.Sprintf("%d-%d", iv.Start, iv.End))
+		}
+	}
+	return strings.Join(p, ",")
 }
 
 // timelineCommand writes the timeline to stdout.
@@ -299,14 +311,14 @@ func timelineCommand(e *env) *cobra.Command {
 		window        time.Duration
 	)
 	cmd := &cobra.Command{
-		Use:   "timeline TRACE",
+		Use:   "timeline TRACE...",
 		Short: "Write the timeline of events: text, CSV or JSON Lines on stdout",
-		Args:  args(1, 1),
+		Args:  args(1, -1),
 		RunE: func(cmd *cobra.Command, a []string) error {
 			if e.json {
 				format = "jsonl"
 			}
-			return runTimeline(cmd, e, &af, &sf, a[0], e.stdout, format, order, window)
+			return runTimeline(cmd, e, &af, &sf, a, e.stdout, format, order, window)
 		},
 	}
 	af.register(cmd)
@@ -317,7 +329,7 @@ func timelineCommand(e *env) *cobra.Command {
 	return cmd
 }
 
-func runTimeline(cmd *cobra.Command, e *env, af *analyzeFlags, sf *selFlags, arg string, w io.Writer, format, order string, window time.Duration) error {
+func runTimeline(cmd *cobra.Command, e *env, af *analyzeFlags, sf *selFlags, ins []string, w io.Writer, format, order string, window time.Duration) error {
 	sel, err := sf.selection()
 	if err != nil {
 		return err
@@ -338,7 +350,7 @@ func runTimeline(cmd *cobra.Command, e *env, af *analyzeFlags, sf *selFlags, arg
 	if window <= 0 {
 		return usageErr("--window %v: must be positive", window)
 	}
-	f, err := open(e, arg)
+	f, err := openInputs(e, ins)
 	if err != nil {
 		return err
 	}
@@ -385,7 +397,7 @@ func textTimeline(cmd *cobra.Command, e *env, f *trace.File, o trace.Options, se
 }
 
 func exportCommand(e *env) *cobra.Command {
-	cmd := &cobra.Command{Use: "export", Short: "Export a trace: timeline (MBCAP follows)"}
+	cmd := &cobra.Command{Use: "export", Short: "Export a trace: MBCAP for replay, or the timeline"}
 	var (
 		af          analyzeFlags
 		sf          selFlags
@@ -394,9 +406,9 @@ func exportCommand(e *env) *cobra.Command {
 		window      time.Duration
 	)
 	tl := &cobra.Command{
-		Use:   "timeline TRACE -o OUT",
+		Use:   "timeline TRACE... -o OUT",
 		Short: "Write the timeline as CSV or JSON Lines to a file (format from the extension or --format)",
-		Args:  args(1, 1),
+		Args:  args(1, -1),
 		RunE: func(cmd *cobra.Command, a []string) error {
 			if out == "" {
 				return usageErr("export timeline: -o OUT is required")
@@ -414,8 +426,8 @@ func exportCommand(e *env) *cobra.Command {
 			if format == "text" {
 				return usageErr("export timeline: --format csv or jsonl")
 			}
-			return safeWrite(e, a[0], out, func(w io.Writer) error {
-				return runTimeline(cmd, e, &af, &sf, a[0], w, format, order, window)
+			return safeWriteAll(e, a, out, func(w io.Writer) error {
+				return runTimeline(cmd, e, &af, &sf, a, w, format, order, window)
 			})
 		},
 	}
@@ -425,20 +437,23 @@ func exportCommand(e *env) *cobra.Command {
 	tl.Flags().StringVar(&format, "format", "", "csv or jsonl (default: from the extension)")
 	tl.Flags().StringVar(&order, "order", "time", "time or file")
 	tl.Flags().DurationVar(&window, "window", timeline.DefaultWindow, "reorder window of --order time")
-	cmd.AddCommand(tl)
+	cmd.AddCommand(mbcapCommand(e), tl)
 	return cmd
 }
 
-// safeWrite writes out through a temporary file next to it, renamed into
-// place only on success; an output that is also the input is refused.
-func safeWrite(e *env, in, out string, write func(io.Writer) error) error {
+// safeWriteAll writes out through a temporary file next to it, renamed
+// into place only on success; an output that is also an input is refused.
+func safeWriteAll(e *env, ins []string, out string, write func(io.Writer) error) error {
 	if out == "-" {
 		return write(e.stdout)
 	}
-	if in != "-" {
+	for _, in := range ins {
+		if in == "-" {
+			continue
+		}
 		if a, err := os.Stat(in); err == nil {
 			if b, err := os.Stat(out); err == nil && os.SameFile(a, b) {
-				return usageErr("the output %s is the input", out)
+				return usageErr("the output %s is an input", out)
 			}
 		}
 	}

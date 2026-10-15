@@ -1,0 +1,187 @@
+{
+  "$defs": {
+    "mbtracectl.flowsDoc": {
+      "additionalProperties": false,
+      "properties": {
+        "flows": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/trace.Flow"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "flows",
+        "schema_version"
+      ],
+      "type": "object"
+    },
+    "trace.Flow": {
+      "additionalProperties": false,
+      "properties": {
+        "a": {
+          "description": "ip:port, IPv6 in brackets",
+          "type": "string"
+        },
+        "adus": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "b": {
+          "description": "ip:port, IPv6 in brackets",
+          "type": "string"
+        },
+        "bytes": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "class": {
+          "type": "string"
+        },
+        "close": {
+          "type": "string"
+        },
+        "first": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "foreign_protocol": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "gap_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "gaps": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "interface": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "junk_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "max_run": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "multiple_interfaces": {
+          "type": "boolean"
+        },
+        "open": {
+          "type": "string"
+        },
+        "out_of_order": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "overlap_conflict": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "packets": {
+          "items": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "resyncs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retransmitted": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "role_confidence": {
+          "type": "number"
+        },
+        "role_guessed": {
+          "type": "boolean"
+        },
+        "role_source": {
+          "type": "string"
+        },
+        "score": {
+          "type": "number"
+        },
+        "server_port": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "a",
+        "adus",
+        "b",
+        "bytes",
+        "class",
+        "close",
+        "foreign_protocol",
+        "gap_bytes",
+        "gaps",
+        "id",
+        "interface",
+        "junk_bytes",
+        "max_run",
+        "multiple_interfaces",
+        "open",
+        "out_of_order",
+        "overlap_conflict",
+        "packets",
+        "resyncs",
+        "retransmitted",
+        "role_confidence",
+        "role_guessed",
+        "role_source",
+        "score"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/flows-1.schema.json",
+  "$ref": "#/$defs/mbtracectl.flowsDoc",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The TCP flows with their Modbus assessment.",
+  "title": "mbtracectl flows --json"
+}

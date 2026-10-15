@@ -1,0 +1,37 @@
+{
+  "$defs": {
+    "mbtracectl.versionDoc": {
+      "additionalProperties": false,
+      "properties": {
+        "build_date": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "build_date",
+        "commit",
+        "schema_version",
+        "tag",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/version-1.schema.json",
+  "$ref": "#/$defs/mbtracectl.versionDoc",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The build of mbtracectl.",
+  "title": "mbtracectl version --json"
+}

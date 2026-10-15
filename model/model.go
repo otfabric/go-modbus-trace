@@ -36,8 +36,9 @@ func (h *Hex) UnmarshalText(b []byte) error {
 
 // FrameRef points at the packet that carried part of an ADU.
 type FrameRef struct {
-	Frame  uint64     `json:"frame"`  // 1-based, as Wireshark numbers frames
-	Offset int64      `json:"offset"` // record or block start in the (decompressed) file
+	Part   uint16     `json:"part,omitempty"` // index of the input file, when there are several
+	Frame  uint64     `json:"frame"`          // 1-based within its file, as Wireshark numbers frames
+	Offset int64      `json:"offset"`         // record or block start in the (decompressed) file
 	Iface  uint32     `json:"interface"`
 	Time   *time.Time `json:"time,omitempty"` // absent for a packet without timestamp
 	PayOff int32      `json:"payload_offset"` // of these bytes in the packet; -1 after IP reassembly

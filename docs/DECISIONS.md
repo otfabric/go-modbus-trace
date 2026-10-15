@@ -190,6 +190,24 @@ Here, *changed values* counts, per target, every FC01-04 register or coil whose 
 - **LA6 without privileges**: a go-modbus v1.7.1 client and server on loopback through a recording proxy (TESTING.md's bridge) give real frames for every function the client supports; the decode equals the client API's values. A tcpdump fixture would need privileges; none is committed.
 - **Throughput**: `Analyze` runs at about 140 MiB/s on an M1 core (L23 asks for 100 MB/s); the decoder allocates a field list per ADU, the first place to look at L4.
 
+## D11. L3: what the implementation settled (2026-10-15)
+
+- **The export spools.** A capture header must come first, but `WallStart`, the input hashes and the first and last packet times are known only at the end of the pass. The exporter writes admitted samples to a temporary file (a 14-byte record header plus the two PDUs) and writes the capture after the pass. Memory stays at the target and stream tables; a stream (stdin) gets the same `WallStart` rule as a file, so the earlier "first packet seen" fallback is gone (`outside_window` now means outside the selected time window only) (MBCAP-EXPORT section 2).
+- **`Classify` mirrors the library and is tested against it.** The FC01–04 response-size check reproduces `capture.SplitAddresses`; a test runs every function code, FC08 sub-function and MEI type through both `Classify` and `capture.NewChecker` and requires the same verdict. A writer error is returned, never counted as an exclusion.
+- **The report's state is bounded per target.** `stale_after_write` needs the writes and the last read per range: the most recent 4,096 writes and the first 65,536 distinct read ranges are kept; past those caps a warning can be missed (the writes are counted as `write_function` either way). The replay estimate keeps the last value per FC01–04 address (bounded by the address spaces) and the hash of the last response to at most 65,536 distinct other requests; past that cap every response counts as changed, so the estimate stays an upper bound.
+- **Several input files** are one trace (`trace.OpenFiles`): connection, reassembly and pairing state carry across, `FrameRef.Part` names the file (omitted for the first), `FileSummary.Inputs` lists each. `File.Frames` on a stream is refused up front with `ErrNotSeekable`.
+- **Pinned tools.** modbusctl's v3 tags are not Go module versions (its module path has no `/v3`), so `go install ...@v3.2.0` fails; the Makefile pins the pseudo-version of the v3.2.0 commit. mbcapctl is pinned at v0.0.2. The `replay` CI job installs both and runs LA10 with `MBTRACE_REQUIRE_TOOLS=1`.
+- **go-modbus-capture** became a direct dependency (it was indirect through go-modbus).
+
+## D12. L4: what the implementation settled (2026-10-15)
+
+- **Analyzer caps drop new keys, not old ones**: a device, pattern or range beyond its cap is counted in `overflow` instead of being folded into an `other` bucket, which would mix unrelated devices (ARCHITECTURE section 2 updated).
+- **Schemas are generated** from the Go types by `internal/schemagen` for every CLI document and the file summary (L22): no additional properties, `omitempty` fields optional, nil slices, maps and pointers nullable. A test fails when a committed schema differs and validates the real output of every command against its schema. The event schema stays hand-written, as in L2.
+- **Sub-trace selection is per connection.** `extract` takes `--server`, `--client`, `--conn` and a time window; transaction-level flags are refused, because a packet can carry several transactions. Either end may match `--server`/`--client`, since roles are not decided there.
+- **Oracle triage** (tshark 4.6.9): tshark does not link exception responses to their requests; the test compares only their exception code (TESTING.md section 4).
+- **Throughput** after the L2 note on allocation: `Scan` 768 MB/s and `Analyze` 206 MB/s per M1 core on the 32 MiB benchmark trace (L23: 200 and 100).
+- **The `summary` JSON changed** from L2's `devices` list to the four analyzer results (`overview`, `devices`, `patterns`, `coverage`); there has been no release, so `schema_version` stays 1.
+
 ## Open questions for the user
 
 - **Q1. CLI name.** Keep `mbtracectl`? **Answered 2026-10-15: yes, `mbtracectl`.**
@@ -199,3 +217,6 @@ Here, *changed values* counts, per target, every FC01-04 register or coil whose 
 - **Q5. IPv6 fragments.** Promote from SHOULD to MUST, since the cost is about 10 lines? **Answered 2026-10-15: yes, MUST (REQUIREMENTS L2).**
 - **Q6. Replay memory warning.** Is 1 GiB the right threshold for the `replay_memory` warning, or should it follow the target machine (a flag)? **Answered 2026-10-15: a flag, `--warn-replay-memory` (default 1 GiB; `0` disables the warning).**
 - **Q7. The guide.** Can you put a copy of the Implementation Guide (V1.0b, or the V1.0a the specification cites) next to `go-modbus/spec/`, so that L2 can reconcile D7 against it without network access? **Answered 2026-10-15: yes, the user provides it.**
+- **Q8. A real fixture.** `testdata/capture-1.pcap` (the capture you tested L2 on) is not committed: AGENTS.md forbids customer traces, and its origin is not recorded here. May it be committed, with its origin in `testdata/README.md`, or should it stay local?
+- **Q9. TID reuse.** D10 follows ARCHITECTURE section 9 (`ambiguous`) over REQUIREMENTS L8 (`unanswered`) for a reused transaction ID with a different PDU. Confirm, or say which should win.
+- **Q10. Decoded views in the JSON Lines timeline.** Every event carries its decoded request and response views, which makes the file several times larger than the raw PDUs alone. Keep them by default, or omit them unless asked (`--views`)?

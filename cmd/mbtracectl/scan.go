@@ -141,10 +141,7 @@ func infoCommand(e *env) *cobra.Command {
 				}
 			}
 			if e.json {
-				if err := writeJSON(e.stdout, struct {
-					SchemaVersion int        `json:"schema_version"`
-					Traces        []infoJSON `json:"traces"`
-				}{schemaVersion, outs}); err != nil {
+				if err := writeJSON(e.stdout, infoDoc{schemaVersion, outs}); err != nil {
 					return err
 				}
 			}
@@ -159,6 +156,18 @@ type flowCounts struct {
 	TCP    int `json:"tcp"`
 	Modbus int `json:"modbus_tcp"`
 	TLS    int `json:"tls"`
+}
+
+// infoDoc is the JSON form of info (docs/schema/info-1.schema.json).
+type infoDoc struct {
+	SchemaVersion int        `json:"schema_version"`
+	Traces        []infoJSON `json:"traces"`
+}
+
+// flowsDoc is the JSON form of flows (docs/schema/flows-1.schema.json).
+type flowsDoc struct {
+	SchemaVersion int          `json:"schema_version"`
+	Flows         []trace.Flow `json:"flows"`
 }
 
 type infoJSON struct {
@@ -296,10 +305,7 @@ from the traffic, not from the port.`,
 				shown = []trace.Flow{}
 			}
 			if e.json {
-				err = writeJSON(e.stdout, struct {
-					SchemaVersion int          `json:"schema_version"`
-					Flows         []trace.Flow `json:"flows"`
-				}{schemaVersion, shown})
+				err = writeJSON(e.stdout, flowsDoc{schemaVersion, shown})
 			} else {
 				err = printFlows(e.stdout, shown)
 			}

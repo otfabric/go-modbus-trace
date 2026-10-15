@@ -235,7 +235,7 @@ func (a *aconn) refs(d int, pos uint64, n int) ([]model.FrameRef, bool, bool) {
 		if s >= e {
 			continue
 		}
-		r := model.FrameRef{Frame: c.ch.Frame, Offset: c.ch.Offset, Iface: c.ch.Iface, PayOff: -1, PayLen: int32(e - s)}
+		r := model.FrameRef{Part: c.ch.Part, Frame: c.ch.Frame, Offset: c.ch.Offset, Iface: c.ch.Iface, PayOff: -1, PayLen: int32(e - s)}
 		if c.ch.PayOff >= 0 {
 			r.PayOff = c.ch.PayOff + int32(s-c.pos)
 		}
