@@ -13,7 +13,7 @@ How events from a passive trace become an MBCAP file that `modbusctl server repl
 | MBCAP | Content |
 |---|---|
 | `Header.TickNS` | `capture.DefaultTickNS` (1000 ns). `--tick-ns` may lower it (down to 1) for nanosecond traces. A time is `floor((t - WallStart) / TickNS)`. |
-| `Header.WallStart` | The earliest packet timestamp of the trace (the `Scan` pass computes it), or the start of the selected time window when one is given. Never `time.Now`. For streamed input (stdin) the first packet seen; a packet stamped earlier than that is reported and its samples are excluded as `outside_window`. |
+| `Header.WallStart` | The earliest packet timestamp of the trace (of every input, for several files), or the start of the selected time window when one is given. Never `time.Now`. The header is written after the pass (below), so streamed input (stdin) gets the same rule. |
 | `Header.Exceptions` | `true` by default (writers drop exception responses otherwise *(verified)*). `--no-exceptions` turns it off. |
 | `Header.ChangeOnly` | `false` by default: repeated identical responses are kept, so the poll cadence survives. `--change-only` is an explicit derived export; the writer then drops repeated responses and the report counts them (`change_only_dropped`). |
 | `Header.Producer` | e.g. `modbus-trace-explorer 0.1.0 (go-modbus-trace 0.1.0)` or `mbtracectl 0.1.0`, passed in by the caller. |
@@ -21,6 +21,8 @@ How events from a passive trace become an MBCAP file that `modbusctl server repl
 | `Target` | One per **(server IP, server port, unit ID)**. `ID` = 1, 2, 3, ... in order of the first exported transaction. `Transport = TransportTCP`, `Host` = the server address as `netip.Addr.String()`, `Port`, `Unit`. `Label` = `--name ip:port/unit=Label` if given, else `<ip>:<port> unit <unit>`. Target tags: `trace.role_source` (`override|syn|port|structure`). A server seen on two interfaces is one target; the endpoint is advisory and a replayer may override it *(verified: concepts.md)*. |
 | `Stream` | One per **(target, client IP address)**. `ID` in order of first use, `Role = "passive"` (free label; the conventional ones are poll, scan, identity, snapshot, other), `Label = "client <ip>"`. A client that reconnects, or uses several ports, stays in one stream; connection epochs, client ports and MBAP transaction IDs live in the trace, not in MBCAP. Why not one stream per connection: modbusctl hosts all streams of a target merged by time and has no stream-selection flag *(verified: `ReplayServerConfig` has none; `replay.Options.Streams` is internal)*, so finer streams buy nothing and cost index size. |
 | `Sample` | `Stream`; `At` = ticks of the time the **last packet of the response ADU** was observed (the instant the response was fully received); `Request` and `Response` = the raw PDUs including the function code byte (never the MBAP header). |
+
+**One pass, then the file.** A capture header must be written first, but its `WallStart` and tags are known only at the end of the pass. The exporter therefore spools the admitted samples to a temporary file during the pass (14 bytes of stream, time and lengths, then the two PDUs; nothing else is kept in memory but the target and stream tables), builds the header from the pass's summary, and then writes every sample through `capture.Checker` and the caller's writer. The temporary file is removed on return, also on error.
 
 Sample order is the order of determination (response completion), which follows file order. MBCAP tolerates slightly out-of-order times across streams *(verified)*; the exporter does not sort. A trace that is badly out of time order is reported (`time_disorder`) but exported as is.
 
@@ -66,21 +68,23 @@ Written next to the capture on request (`--report report.json`) and returned by 
   "inputs": [{"file": "site.pcapng", "sha256": "...", "packets": 1830211, "first": "...", "last": "..."}],
   "selection": "unit=1,2; from=0s",
   "tick_ns": 1000,
+  "wall_start": "2026-10-15T08:00:00Z",
   "transactions_seen": 912340,
   "samples_written": 880101,
   "change_only_dropped": 0,
   "excluded": {"write_function": 120, "fc23": 3, "unsupported_function": 17, "unanswered": 9, "orphan_response": 4, "ambiguous_pair": 0, "invalid_pdu": 2, "not_selected": 31000, "...": 0},
-  "targets": [{"id": 1, "server": "10.0.3.21:502", "unit": 1, "label": "10.0.3.21:502 unit 1",
+  "targets": [{"id": 1, "server": "10.0.3.21:502", "unit": 1, "label": "10.0.3.21:502 unit 1", "role_source": "syn",
                "streams": [{"id": 1, "client": "10.0.3.5", "samples": 440000}],
                "samples": 440000, "exceptions": 12, "by_function": {"3": 430000, "4": 9988, "43": 12},
                "first": "...", "last": "..."}],
   "quality": {"retransmitted": 41, "gaps": 0, "resyncs": 0, "snaplen_truncated": 0, "capture_drops": 0},
-  "warnings": [{"code": "stale_after_write", "target": 1, "space": "holding", "start": 4096, "count": 2, "write_time": "...", "last_read_time": "..."}],
-  "replay": {"samples": 880101, "estimated_in_memory_bytes": 0}
+  "warnings": [{"code": "format_draft", "text": "..."},
+               {"code": "stale_after_write", "target": 1, "space": "holding", "start": 4096, "count": 2, "write_time": "...", "last_read_time": "...", "text": "..."}],
+  "replay": {"samples": 880101, "changed_values": 1520331, "estimated_in_memory_bytes": 727390578}
 }
 ```
 
-The identity `transactions_seen = samples_written + change_only_dropped + sum(excluded)` holds exactly and is tested (LA9). Timeline events that are not transactions (connection events, gaps) are not counted in `transactions_seen`.
+`excluded` lists every reason code, with 0 for those that did not occur. `first` and `last` of an input are given for a single input. The identity `transactions_seen = samples_written + change_only_dropped + sum(excluded)` holds exactly and is tested (LA9). Timeline events that are not transactions (connection events, gaps) are not counted in `transactions_seen`.
 
 Warning codes: `stale_after_write` (a write to a range after the last exported read of that range: the replay will keep the pre-write value), `capture_drops` (the pcapng interface statistics report drops), `gap_in_window`, `unit_collision` (two targets with the same unit ID: they need separate replay instances, section 6), `role_guessed` (a target whose role came from structure only), `single_sample_target`, `time_disorder`, `format_draft`, `replay_memory` (the estimate below exceeds `--warn-replay-memory`, default 1 GiB, `0` disables it; `DECISIONS.md` Q6). `estimated_in_memory_bytes` is `12 MiB + 750 B × samples + 36 B × changed values`, where changed values counts, per target, every FC01-04 register or coil whose value differs from that address's previous exported sample, plus the bytes of every other response that differs from the previous response to the same request *(verified, L0: modbusctl v3.2.0 keeps every sample and one 16-byte point per changed address; the formula bounds every measurement, 1-30% high, `DECISIONS.md` D6)*. The file size says nothing about it: deflate made a 1.8 MiB file that needs 1.3 GiB to replay.
 
@@ -88,7 +92,7 @@ Warning codes: `stale_after_write` (a write to a range after the last exported r
 
 ```sh
 mbtracectl flows   site.pcapng                                    # which flows look like Modbus/TCP, on which ports
-mbtracectl summary site.pcapng --server-port 502,1502             # devices, units, poll patterns, quality
+mbtracectl summary site.pcapng --server-port 502,1502             # devices, units, poll patterns, addresses read
 mbtracectl export mbcap site.pcapng -o site.mbcap --report site.report.json
 mbcapctl verify site.mbcap && mbcapctl info site.mbcap
 modbusctl server replay --input site.mbcap --listen 127.0.0.1 --port 1502 \
@@ -114,4 +118,4 @@ What a replay does and does not give you:
 
 ## 7. Tests
 
-LA9 (admission matrix row by row, property test against `capture.NewChecker`, verify across encodings, report identity), LA10 (end-to-end replay against the pinned modbusctl), LA11 (determinism). Fixtures: `testdata/mbcap/` holds expected outputs as `.mbcap.jsonl` for readable diffs; CI converts with `capture` code, not with a second codec.
+LA9 (admission matrix row by row, property test against `capture.NewChecker`, verify across encodings with `capture.Diff`, report identity), LA10 (end-to-end replay against the pinned modbusctl, `replay_test.go`, TESTING.md section 5), LA11 (determinism: two exports are byte-identical). The tests build their traces with `trace/tracetest` and compare in memory; no expected capture is stored.

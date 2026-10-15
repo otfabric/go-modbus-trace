@@ -7,13 +7,16 @@ import (
 	"time"
 )
 
-// FileSummary describes a trace file (the result of Scan).
+// FileSummary describes a trace (the result of Scan). With several input
+// files the top-level file, format and size describe them together and
+// Inputs each one.
 type FileSummary struct {
-	File        string      `json:"file"` // base name, or "-"
+	File        string      `json:"file"` // base name, or "-"; several joined by commas
 	Format      string      `json:"format"`
 	Gzip        bool        `json:"gzip"`
 	InputBytes  int64       `json:"input_bytes"` // as stored (compressed for gzip)
-	SHA256      string      `json:"sha256"`      // of the input as stored; complete only if the read reached the end
+	SHA256      string      `json:"sha256"`      // of the input as stored (empty for several: see Inputs); complete only if the read reached the end
+	Inputs      []Input     `json:"inputs"`
 	Packets     uint64      `json:"packets"`
 	Bytes       uint64      `json:"bytes"` // captured bytes
 	First       *time.Time  `json:"first,omitempty"`
@@ -41,9 +44,20 @@ type FileSummary struct {
 	TransactionFlags map[string]uint64 `json:"transaction_flags,omitempty"`
 }
 
+// Input describes one input file.
+type Input struct {
+	File       string `json:"file"` // base name, or "-"
+	Format     string `json:"format"`
+	Gzip       bool   `json:"gzip"`
+	InputBytes int64  `json:"input_bytes"`
+	SHA256     string `json:"sha256"`
+	Packets    uint64 `json:"packets"`
+}
+
 // Interface is a capture interface.
 type Interface struct {
-	ID          int     `json:"id"`
+	ID          int     `json:"id"`   // within its input
+	Part        int     `json:"part"` // index of the input file
 	Section     int     `json:"section"`
 	LinkType    uint16  `json:"link_type"`
 	Link        string  `json:"link"`
@@ -57,6 +71,7 @@ type Interface struct {
 
 // Section is pcapng section metadata (the capturing tool).
 type Section struct {
+	Part        int    `json:"part"`
 	Application string `json:"application,omitempty"`
 	OS          string `json:"os,omitempty"`
 	Hardware    string `json:"hardware,omitempty"`

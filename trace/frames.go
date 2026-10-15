@@ -32,43 +32,59 @@ type frameIndex struct {
 	err  error
 }
 
-// Frames re-reads the referenced packets of an uncompressed trace file by
+// Frames re-reads the referenced packets of uncompressed trace files by
 // their offsets, so an application can show raw bytes without keeping
 // them. It is safe for concurrent use.
 func (f *File) Frames(refs []model.FrameRef) ([]Frame, error) {
-	if f.stream != nil {
-		return nil, ErrNotSeekable
-	}
-	fh, err := os.Open(f.path)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = fh.Close() }()
-	f.index.once.Do(func() {
-		fi, err := fh.Stat()
-		if err != nil {
-			f.index.err = err
-			return
+	for _, p := range f.parts {
+		if p.stream != nil {
+			return nil, ErrNotSeekable
 		}
-		f.index.ix, f.index.err = pcapio.NewIndex(fh, fi.Size())
-	})
-	if errors.Is(f.index.err, pcapio.ErrNotSeekable) {
-		return nil, ErrNotSeekable
-	}
-	if f.index.err != nil {
-		return nil, f.index.err
 	}
 	out := make([]Frame, 0, len(refs))
 	for _, r := range refs {
-		p, err := f.index.ix.ReadAt(fh, r.Offset)
-		if err != nil {
-			return out, fmt.Errorf("frame %d: %w", r.Frame, err)
+		if int(r.Part) >= len(f.parts) {
+			return out, fmt.Errorf("frame %d: no input file %d", r.Frame, r.Part)
 		}
-		fr := Frame{Ref: r, LinkType: p.LinkType, TimeNS: p.TimeNS, OrigLen: p.OrigLen, Data: p.Data}
-		if r.PayOff >= 0 && int(r.PayOff)+int(r.PayLen) <= len(p.Data) {
-			fr.Payload = p.Data[r.PayOff : r.PayOff+r.PayLen]
+		fr, err := f.parts[r.Part].frame(r)
+		if err != nil {
+			return out, err
 		}
 		out = append(out, fr)
 	}
 	return out, nil
+}
+
+func (p *part) frame(r model.FrameRef) (Frame, error) {
+	if p.stream != nil {
+		return Frame{}, ErrNotSeekable
+	}
+	fh, err := os.Open(p.path)
+	if err != nil {
+		return Frame{}, err
+	}
+	defer func() { _ = fh.Close() }()
+	p.index.once.Do(func() {
+		fi, err := fh.Stat()
+		if err != nil {
+			p.index.err = err
+			return
+		}
+		p.index.ix, p.index.err = pcapio.NewIndex(fh, fi.Size())
+	})
+	if errors.Is(p.index.err, pcapio.ErrNotSeekable) {
+		return Frame{}, ErrNotSeekable
+	}
+	if p.index.err != nil {
+		return Frame{}, p.index.err
+	}
+	pk, err := p.index.ix.ReadAt(fh, r.Offset)
+	if err != nil {
+		return Frame{}, fmt.Errorf("frame %d: %w", r.Frame, err)
+	}
+	fr := Frame{Ref: r, LinkType: pk.LinkType, TimeNS: pk.TimeNS, OrigLen: pk.OrigLen, Data: pk.Data}
+	if r.PayOff >= 0 && int(r.PayOff)+int(r.PayLen) <= len(pk.Data) {
+		fr.Payload = pk.Data[r.PayOff : r.PayOff+r.PayLen]
+	}
+	return fr, nil
 }

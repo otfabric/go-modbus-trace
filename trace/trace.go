@@ -15,6 +15,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"strings"
 
 	"github.com/otfabric/go-modbus-trace/internal/flow"
 	"github.com/otfabric/go-modbus-trace/internal/pcapio"
@@ -32,8 +33,15 @@ var (
 	ErrConsumed = errors.New("trace: a stream input can be read only once")
 )
 
-// File is an opened trace: a path (any number of passes) or a stream (one).
+// File is an opened trace: one or more paths (any number of passes), or a
+// stream (one). Several paths are one continuous trace, read in the order
+// given: connection state carries from one file to the next (rotated
+// tcpdump -C/-G files).
 type File struct {
+	parts []*part
+}
+
+type part struct {
 	path   string
 	size   int64
 	stream io.Reader
@@ -42,41 +50,78 @@ type File struct {
 }
 
 // Open opens a trace file by path. Nothing is read until a pass runs.
-func Open(path string) (*File, error) {
-	fi, err := os.Stat(path)
-	if err != nil {
-		return nil, err
+func Open(path string) (*File, error) { return OpenFiles(path) }
+
+// OpenFiles opens several trace files that are one trace, in time order.
+func OpenFiles(paths ...string) (*File, error) {
+	if len(paths) == 0 {
+		return nil, errors.New("trace: no input")
 	}
-	if fi.IsDir() {
-		return nil, fmt.Errorf("%s: is a directory", path)
+	f := &File{}
+	for _, path := range paths {
+		fi, err := os.Stat(path)
+		if err != nil {
+			return nil, err
+		}
+		if fi.IsDir() {
+			return nil, fmt.Errorf("%s: is a directory", path)
+		}
+		f.parts = append(f.parts, &part{path: path, size: fi.Size()})
 	}
-	return &File{path: path, size: fi.Size()}, nil
+	return f, nil
 }
 
 // OpenReader wraps a stream (for example standard input). It can be read
 // by one pass only.
-func OpenReader(r io.Reader) *File { return &File{stream: r, size: -1} }
+func OpenReader(r io.Reader) *File { return &File{parts: []*part{{stream: r, size: -1}}} }
 
-// Name returns the path, or "-" for a stream.
+// Name returns the path ("-" for a stream); for several files the paths
+// joined by commas.
 func (f *File) Name() string {
-	if f.stream != nil {
-		return "-"
+	names := make([]string, len(f.parts))
+	for i, p := range f.parts {
+		names[i] = p.name()
 	}
-	return f.path
+	return strings.Join(names, ",")
 }
 
-// Size returns the file size, or -1 for a stream.
-func (f *File) Size() int64 { return f.size }
+// Names returns the path of every input ("-" for a stream).
+func (f *File) Names() []string {
+	names := make([]string, len(f.parts))
+	for i, p := range f.parts {
+		names[i] = p.name()
+	}
+	return names
+}
 
-func (f *File) open() (io.ReadCloser, error) {
-	if f.stream != nil {
-		if f.used {
+// Size returns the total size of the files, or -1 for a stream.
+func (f *File) Size() int64 {
+	var n int64
+	for _, p := range f.parts {
+		if p.size < 0 {
+			return -1
+		}
+		n += p.size
+	}
+	return n
+}
+
+func (p *part) name() string {
+	if p.stream != nil {
+		return "-"
+	}
+	return p.path
+}
+
+func (p *part) open() (io.ReadCloser, error) {
+	if p.stream != nil {
+		if p.used {
 			return nil, ErrConsumed
 		}
-		f.used = true
-		return io.NopCloser(f.stream), nil
+		p.used = true
+		return io.NopCloser(p.stream), nil
 	}
-	return os.Open(f.path)
+	return os.Open(p.path)
 }
 
 // Limits bound memory. Zero values take the defaults.
@@ -138,3 +183,6 @@ type ScanOptions struct {
 	// bytes read and the total (-1 for a stream).
 	Progress func(read, total int64)
 }
+
+// Version is the version of this library, recorded in exports.
+const Version = "0.1.0"

@@ -103,7 +103,7 @@ MBTRACECTL_SERVER_PORT=502,1502). A flag on the command line wins.`,
 	}
 	root.PersistentFlags().BoolVar(&e.json, "json", false, "write JSON (docs/json-output.md) instead of text")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageErr("%v", err) })
-	root.AddCommand(infoCommand(e), flowsCommand(e), summaryCommand(e), timelineCommand(e), exportCommand(e), versionCommand(e))
+	root.AddCommand(infoCommand(e), flowsCommand(e), summaryCommand(e), timelineCommand(e), exportCommand(e), extractCommand(e), versionCommand(e))
 	return root
 }
 
@@ -137,6 +137,15 @@ func args(min, max int) cobra.PositionalArgs {
 	}
 }
 
+// versionDoc is the JSON form of version (docs/schema/version-1.schema.json).
+type versionDoc struct {
+	SchemaVersion int    `json:"schema_version"`
+	Version       string `json:"version"`
+	Tag           string `json:"tag"`
+	Commit        string `json:"commit"`
+	BuildDate     string `json:"build_date"`
+}
+
 func versionCommand(e *env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
@@ -144,7 +153,7 @@ func versionCommand(e *env) *cobra.Command {
 		Args:  args(0, 0),
 		RunE: func(*cobra.Command, []string) error {
 			if e.json {
-				return writeJSON(e.stdout, map[string]string{"version": version, "tag": tag, "commit": commit, "build_date": buildDate})
+				return writeJSON(e.stdout, versionDoc{schemaVersion, version, tag, commit, buildDate})
 			}
 			_, err := fmt.Fprintf(e.stdout, "mbtracectl %s (commit %s, built %s)\n", version, commit, buildDate)
 			return err

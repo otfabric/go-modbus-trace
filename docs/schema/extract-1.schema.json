@@ -1,0 +1,40 @@
+{
+  "$defs": {
+    "mbtracectl.extractDoc": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "connections": {
+          "type": "integer"
+        },
+        "packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "packets_without_time": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "schema_version": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "bytes",
+        "connections",
+        "packets",
+        "packets_without_time",
+        "schema_version"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/extract-1.schema.json",
+  "$ref": "#/$defs/mbtracectl.extractDoc",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "What a sub-trace extraction wrote.",
+  "title": "mbtracectl extract --json"
+}

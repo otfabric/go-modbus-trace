@@ -1,6 +1,6 @@
 # go-modbus-trace: agent handoff
 
-Status (2026-10-15): **L0, L1 and L2 are implemented**: readers, link/IP/TCP, flows and reassembly, framing and roles, PDU decoding and validation, pairing, the event model with its JSON Schema, `trace.Scan`, `trace.Analyze`, `File.Frames`, `selection`, the timeline export, `trace/tracetest`, and `mbtracectl info|flows|summary|timeline|export timeline|version`. L3 (MBCAP export) is next. This file is the entry point for Claude Code and other agents. Read it fully, then the documents it points to, before writing code.
+Status (2026-10-15): **L0 to L4 are implemented** (v0.1.0): readers, link/IP/TCP, flows and reassembly, framing and roles, PDU decoding and validation, pairing, the event model, `trace.Scan`, `trace.Analyze`, `File.Frames`, `trace.Walk`, several files as one trace, `selection`, the analyzers, the timeline, MBCAP and sub-trace exports, JSON Schemas for every output, `trace/tracetest`, and every `mbtracectl` command. Open questions are at the end of `docs/DECISIONS.md`. This file is the entry point for Claude Code and other agents. Read it fully, then the documents it points to, before writing code.
 
 ## What this is
 

@@ -33,11 +33,22 @@ Build this first (L1); everything else depends on it. It is exported so the appl
 
 ## 4. Oracle: Wireshark's dissector
 
-Where `tshark` is installed (a separate, advisory CI job on Linux), run it over the fixtures and the generated traces and compare per transaction: MBAP transaction ID, unit, function code, reference number, word/bit count, exception code and request/response linking. Field names differ between versions: first check them with `tshark -G fields | grep -i modbus` and write the mapping in `internal/oracle`. Differences are triaged by hand: tshark is a reference, not the truth (its pairing heuristics are its own); a confirmed bug on either side gets a regression fixture.
+Where `tshark` is installed, `TestTsharkOracle` in `trace/oracle_test.go` (run with `MBTRACE_ORACLE=1`; an advisory, non-gating CI job on Linux) runs it over a generated trace and compares per transaction: MBAP transaction ID, unit, function code, reference number, word/bit count, exception code and request/response linking. The field names were checked with `tshark -G fields | grep -i modbus` on tshark 4.6.9 and are mapped in the test. Differences are triaged by hand: tshark is a reference, not the truth (its pairing heuristics are its own); a confirmed bug on either side gets a regression fixture.
+
+Triaged so far (tshark 4.6.9):
+
+- tshark does not link exception responses to their requests (`modbus.request_frame` is empty on them); the test does not compare linking for exceptions.
+- tshark does not frame an MBAP header split across segments (DECISIONS D7); the oracle trace sends each ADU in one segment.
 
 ## 5. Pinned tools
 
-CI installs the pinned releases of `mbcapctl` (go-modbus-capture) and `modbusctl` (v3.2.0 or newer) with `go install ...@<version>` from the versions in `tools.go`/the Makefile, never `@latest`. A test that needs them and finds none fails in CI and skips with an explicit message locally.
+The Makefile pins `mbcapctl` (`MBCAPCTL_VERSION`, go-modbus-capture v0.0.2) and `modbusctl` (`MODBUSCTL_VERSION`: its v3 tags are not Go module versions, so the pin is the pseudo-version of the v3.2.0 commit), never `@latest`. `make tools` installs both with `go install`; `make replay` runs `TestReplayEndToEnd` (LA10) with `MBTRACE_REQUIRE_TOOLS=1`, so a missing tool fails. The CI job `replay` does both. Locally the test finds the tools through `$MBCAPCTL` and `$MODBUSCTL` or `PATH`, and skips with a message when they are absent.
+
+LA10 scripts a client polling holding registers, coils and a paged FC43 identity, exports MBCAP, JSON Lines and long CSV, checks each with `mbcapctl verify`, then serves the capture with `modbusctl server static --at` and `server replay --speed 1000 --loops 1` and reads it back with a go-modbus client: the values equal the script's.
+
+## 5a. Fixture and benchmarks
+
+`testdata/plant.pcapng` is built by `plant()` in `trace/fixture_test.go`; `TestFixture` compares it byte for byte and `make golden` rewrites it. `make bench` runs `BenchmarkScan` and `BenchmarkAnalyze` over a 32 MiB generated trace; CI reports them without gating.
 
 ## 6. What must stay true
 
