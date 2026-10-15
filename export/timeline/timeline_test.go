@@ -142,3 +142,42 @@ func TestReorderWindow(t *testing.T) {
 		t.Errorf("stats %+v", st)
 	}
 }
+
+// TestCSVRows: connection, gap, resync and note events become rows too.
+func TestCSVRows(t *testing.T) {
+	var buf bytes.Buffer
+	b, _ := tracetest.New(&buf, tracetest.Options{Format: tracetest.PcapNG})
+	c := b.Conn(tracetest.ConnOptions{})
+	c.Request(1, 1, tracetest.ReadRequest(3, 0, 1))
+	c.Write(tracetest.ToClient, tracetest.WriteOpts{Lose: []int{0}}, tracetest.Frame{TID: 1, Unit: 1, PDU: tracetest.RegistersResponse(3, 1)})
+	c.Request(2, 1, tracetest.ReadRequest(8, 0, 0))
+	c.Response(2, 1, tracetest.ReadRequest(8, 0, 0))
+	c.Close()
+	b.InterfaceDrops(0, 2)
+	_ = b.Close()
+	out, _ := export(t, buf.Bytes(), Options{Format: CSV, Order: ByFile})
+	rows, err := csv.NewReader(strings.NewReader(out)).ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, r := range rows[1:] {
+		kinds = append(kinds, r[0])
+	}
+	// The request whose response was lost is decided when the next one is
+	// answered, after the gap.
+	if strings.Join(kinds, " ") != "conn.open gap resync txn txn conn.close trace.note" {
+		t.Errorf("kinds %v", kinds)
+	}
+	for _, r := range rows[1:] {
+		if r[0] == "gap" && (r[29] != "s2c" || r[32] != "loss") {
+			t.Errorf("gap row %v", r)
+		}
+		if r[0] == "txn" && r[8] == "8" && r[9] != "0" {
+			t.Errorf("sub-function column %v", r)
+		}
+	}
+	if _, err := newWriter(&bytes.Buffer{}, 9); err == nil {
+		t.Error("an unknown format")
+	}
+}

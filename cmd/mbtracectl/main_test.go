@@ -224,3 +224,28 @@ func TestExportTimeline(t *testing.T) {
 		}
 	}
 }
+
+func TestSelectionFlags(t *testing.T) {
+	path, _ := fixture(t)
+	good := [][]string{
+		{"--client", "10.0.0.1", "--unit", "1", "--conn", "1", "--fc", "0x03", "--status", "ok", "--class", "read", "--no-flag", "slow"},
+		{"--from-time", "2026-10-15T08:00:00Z", "--to-time", "2027-01-01T00:00:00Z", "--range", "holding:100-101"},
+		{"--from", "0s", "--to", "1h", "--server", "10.0.0.2:1502", "--slow", "2s"},
+	}
+	for _, g := range good {
+		code, out, errs := cli(t, nil, append([]string{"timeline", path}, g...)...)
+		if code != exitOK || strings.Count(out, "Read 2 holding registers") != 4 {
+			t.Errorf("%v: exit %d, %s\n%s", g, code, errs, out)
+		}
+	}
+	bad := [][]string{
+		{"--client", "nope"}, {"--unit", "300"}, {"--conn", "x"}, {"--fc", "256"}, {"--from", "-1s"}, {"--to-time", "yesterday"},
+		{"--from", "1s", "--from-time", "2026-10-15T08:00:00Z"}, {"--range", "registers:1-2"}, {"--slow", "0s"}, {"--window", "0s"},
+		{"--server-port", "0"},
+	}
+	for _, b := range bad {
+		if code, _, _ := cli(t, nil, append([]string{"timeline", path}, b...)...); code != exitUsage {
+			t.Errorf("%v: exit %d", b, code)
+		}
+	}
+}
