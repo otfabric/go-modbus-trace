@@ -119,10 +119,10 @@ func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook, an *analysi
 			break // a damaged file ends the pass: what follows is not continuous
 		}
 	}
-	tr.Finish()
+	sc.guard(0, tr.Finish)
 	sc.finish(dec, tr)
 	if an != nil {
-		an.notes(sc.sum)
+		sc.guard(0, func() { an.notes(sc.sum) })
 		if an.err != nil {
 			return sc.sum, nil, an.err
 		}
@@ -151,17 +151,25 @@ type scanner struct {
 
 // packet decodes one packet; a panic is recovered and counted.
 func (sc *scanner) packet(dec *link.Decoder, tr *flow.Tracker, p *pcapio.Packet, seg *link.Segment) {
+	sc.guard(p.Frame, func() {
+		if dec.Decode(p.LinkType, p.Data, seg) == link.OK {
+			tr.Packet(p, seg)
+		}
+	})
+}
+
+// guard runs fn and records a panic as an internal error of frame (0: the
+// end of the trace), so one bad packet never ends the pass.
+func (sc *scanner) guard(frame uint64, fn func()) {
 	defer func() {
 		if r := recover(); r != nil {
+			sc.sum.InternalErrorCount++
 			if len(sc.sum.InternalErrors) < maxInternalErrors {
-				sc.sum.InternalErrors = append(sc.sum.InternalErrors, InternalError{Frame: p.Frame, Message: fmt.Sprint(r)})
+				sc.sum.InternalErrors = append(sc.sum.InternalErrors, InternalError{Frame: frame, Message: fmt.Sprint(r)})
 			}
 		}
 	}()
-	if dec.Decode(p.LinkType, p.Data, seg) != link.OK {
-		return
-	}
-	tr.Packet(p, seg)
+	fn()
 }
 
 // finishPart adds one input's facts to the summary.
@@ -194,6 +202,7 @@ func (sc *scanner) finishPart(i int, pt *part, rd *pcapio.Reader) {
 	r := &s.Reader
 	r.SimplePackets += c.SimplePackets
 	r.SkippedBlocks += c.SkippedBlocks
+	r.BadOptions += c.BadOptions
 	r.UnknownBlocks += c.UnknownBlocks
 	r.OtherFrames += c.OtherFrames
 	r.TruncatedTail = r.TruncatedTail || c.TruncatedTail

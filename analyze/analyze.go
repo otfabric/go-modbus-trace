@@ -20,7 +20,8 @@ const (
 	MaxDevices          = 10_000
 	MaxClientsPerDevice = 256
 	MaxPatterns         = 10_000
-	MaxIntervals        = 4_096 // per server, unit and data space
+	MaxIntervals        = 4_096  // per server, unit and data space
+	MaxCoverageSpaces   = 40_000 // (server, unit, data space) keys of Coverage
 )
 
 // Tee sends every event to every sink, in order; the first error stops.

@@ -203,7 +203,7 @@ type PatternResult struct {
 	JitterNS   int64          `json:"jitter_ns"`          // median absolute deviation of the interval
 	Responses  uint64         `json:"responses"`
 	Changed    uint64         `json:"changed"`    // responses that differ from the previous one
-	Volatility float64        `json:"volatility"` // changed / responses
+	Volatility float64        `json:"volatility"` // changed / (responses - 1)
 }
 
 // PatternsResult lists the patterns, most frequent first.
@@ -298,7 +298,8 @@ func (h *Histogram) mad(m int64) int64 {
 // Coverage records which addresses were read and written, per server,
 // unit and data space, as merged intervals.
 type Coverage struct {
-	m map[string]*spaceCov
+	m        map[string]*spaceCov
+	overflow uint64
 }
 
 type spaceCov struct {
@@ -344,6 +345,10 @@ func (c *Coverage) Event(e *model.Event) error {
 		}
 		k := fmt.Sprintf("%s/%d/%s", t.Server, t.Unit, r.Space)
 		x := c.m[k]
+		if x == nil && len(c.m) >= MaxCoverageSpaces {
+			c.overflow++
+			continue
+		}
 		if x == nil {
 			x = &spaceCov{server: t.Server.String(), unit: t.Unit, space: string(r.Space)}
 			c.m[k] = x
@@ -383,6 +388,10 @@ func merge(list []Interval, iv Interval, overflow *uint64) []Interval {
 	out := append(list[:i:i], iv)
 	return append(out, list[j:]...)
 }
+
+// Overflow counts the ranges of servers, units and spaces beyond
+// MaxCoverageSpaces, which are not recorded.
+func (c *Coverage) Overflow() uint64 { return c.overflow }
 
 // Result returns the coverage, ordered by server, unit and space.
 func (c *Coverage) Result() []CoverageResult {

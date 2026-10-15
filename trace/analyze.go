@@ -86,7 +86,7 @@ func (an *analysis) emit(e *model.Event) {
 		return
 	}
 	an.seq++
-	e.Seq = an.seq
+	e.Seq, e.SchemaVersion = an.seq, model.SchemaVersion
 	an.err = an.sink.Event(e)
 }
 

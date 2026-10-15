@@ -387,3 +387,97 @@ func TestSeveralFiles(t *testing.T) {
 		t.Errorf("tags %v", split.Header.Tags)
 	}
 }
+
+// TestInvalidTime: a response without a timestamp, or stamped before 1970
+// (a damaged clock), is excluded as invalid_time, and the capture starts at
+// the earliest sample instead of at the impossible first packet.
+func TestInvalidTime(t *testing.T) {
+	sp, err := newSpool()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sp.remove()
+	x := &exporter{eo: Options{Producer: "test", TickNS: capture.DefaultTickNS, WarnReplayMemory: -1}, sp: sp, rep: newReport(),
+		targets: map[targetKey]*target{}, streams: map[streamKey]*stream{}, writes: map[targetKey][]write{}}
+	early, good := time.Unix(-3600, 0).UTC(), time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)
+	txn := func(at *time.Time) *model.Event {
+		return &model.Event{Kind: model.KindTxn, Txn: &model.Transaction{Conn: 1, Status: model.StatusOK, Function: 3, Class: "read",
+			Client: netip.MustParseAddrPort("10.0.0.1:40000"), Server: netip.MustParseAddrPort("10.0.0.2:502"), Unit: 1,
+			Request:  &model.ADU{PDU: tracetest.ReadRequest(3, 0, 1), First: at, Last: at},
+			Response: &model.ADU{PDU: tracetest.RegistersResponse(3, 7), First: at, Last: at}}}
+	}
+	for _, at := range []*time.Time{nil, &early, &good} {
+		if err := x.event(txn(at)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := sp.flush(); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	var h capture.Header
+	rep, err := x.write(&trace.FileSummary{First: &early, Last: &good}, func(hh capture.Header) (capture.Writer, error) {
+		h = hh
+		return jsonl.NewWriter(&out, hh)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Excluded[string(InvalidTime)] != 2 || rep.SamplesWritten != 1 || !h.WallStart.Equal(good) {
+		t.Errorf("excluded %v, written %d, wall start %v", rep.Excluded, rep.SamplesWritten, h.WallStart)
+	}
+	identity(t, rep)
+}
+
+// TestMoreWarnings produces the warnings and the reason TestWarnings does
+// not: capture drops, a gap in the window, a role from structure only,
+// time disorder, and transactions of a connection whose roles are unknown.
+func TestMoreWarnings(t *testing.T) {
+	data := build(t, func(b *tracetest.Builder) {
+		// Structure only: no handshake, not a server port.
+		c := b.Conn(tracetest.ConnOptions{Midstream: true, Server: netip.MustParseAddrPort("10.0.0.9:1502")})
+		for i := range 25 {
+			c.Request(uint16(i), 1, tracetest.ReadRequest(3, 0, 1))
+			c.Response(uint16(i), 1, tracetest.RegistersResponse(3, uint16(i)))
+		}
+		// A lost response segment: the transaction after it is uncertain.
+		g := b.Conn(tracetest.ConnOptions{Client: netip.MustParseAddrPort("10.0.0.1:40001"), Server: srv2})
+		g.Request(1, 2, tracetest.ReadRequest(4, 0, 1))
+		g.Write(tracetest.ToClient, tracetest.WriteOpts{Lose: []int{0}}, tracetest.Frame{TID: 1, Unit: 2, PDU: tracetest.RegistersResponse(4, 1)})
+		g.Request(2, 2, tracetest.ReadRequest(4, 0, 1))
+		g.Response(2, 2, tracetest.RegistersResponse(4, 2))
+		// The clock steps back five seconds.
+		b.Advance(-5 * time.Second)
+		g.Request(3, 2, tracetest.ReadRequest(4, 0, 1))
+		g.Response(3, 2, tracetest.RegistersResponse(4, 3))
+		// Roles undecidable: two vendor frames on port 7.
+		u := b.Conn(tracetest.ConnOptions{Midstream: true, Client: netip.MustParseAddrPort("10.0.0.8:41000"), Server: netip.MustParseAddrPort("10.0.0.9:7")})
+		u.Write(tracetest.ToServer, tracetest.WriteOpts{}, tracetest.Frame{TID: 1, Unit: 1, PDU: []byte{0x41, 1}})
+		u.Write(tracetest.ToClient, tracetest.WriteOpts{}, tracetest.Frame{TID: 2, Unit: 1, PDU: []byte{0x41, 2}})
+		b.InterfaceDrops(0, 7)
+	})
+	_, rep := export(t, data, Options{}, "jsonl")
+	codes := map[string]int{}
+	for _, w := range rep.Warnings {
+		codes[w.Code]++
+	}
+	for _, c := range []string{WarnCaptureDrops, WarnGapInWindow, WarnRoleGuessed, WarnTimeDisorder} {
+		if codes[c] == 0 {
+			t.Errorf("no %s warning: %+v", c, rep.Warnings)
+		}
+	}
+	if rep.Excluded[string(RoleUnknown)] == 0 || rep.Quality.CaptureDrops != 7 || rep.Quality.Midstream == 0 || rep.Quality.RoleGuessed == 0 {
+		t.Errorf("excluded %v, quality %+v", rep.Excluded, rep.Quality)
+	}
+	identity(t, rep)
+
+	// A window that ends before the gap (packets are 100 µs apart) has no
+	// gap warning.
+	to := 5 * time.Millisecond
+	_, rep = export(t, data, Options{Selection: selection.Selection{ToOffset: &to}}, "jsonl")
+	for _, w := range rep.Warnings {
+		if w.Code == WarnGapInWindow {
+			t.Errorf("gap warning for a window without the gap: %+v", w)
+		}
+	}
+}

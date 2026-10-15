@@ -214,7 +214,7 @@ func fieldNames(v View) []string {
 	var out []string
 	for _, f := range v.Fields[1:] {
 		n := f.Name
-		if i := strings.Index(n, "_"); i > 0 && strings.HasPrefix(n, "record") || strings.HasPrefix(n, "object") {
+		if i := strings.Index(n, "_"); i > 0 && (strings.HasPrefix(n, "record") || strings.HasPrefix(n, "object")) {
 			n = "…" + n[i:]
 		}
 		if !seen[n] {

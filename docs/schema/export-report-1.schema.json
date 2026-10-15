@@ -181,11 +181,31 @@
           "minimum": 0,
           "type": "integer"
         },
+        "midstream": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "out_of_order": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "resyncs": {
           "minimum": 0,
           "type": "integer"
         },
         "retransmitted": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retried": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "role_guessed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "slow": {
           "minimum": 0,
           "type": "integer"
         },
@@ -197,8 +217,13 @@
       "required": [
         "capture_drops",
         "gaps",
+        "midstream",
+        "out_of_order",
         "resyncs",
         "retransmitted",
+        "retried",
+        "role_guessed",
+        "slow",
         "snaplen_truncated"
       ],
       "type": "object"

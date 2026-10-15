@@ -62,7 +62,7 @@ comment naming the selection. Select with --conn (IDs as flows lists them),
 			if e.json {
 				return writeJSON(e.stdout, extractDoc{schemaVersion, st})
 			}
-			_, err = fmt.Fprintf(e.stdout, "%d packets of %d connections written\n", st.Packets, st.Connections)
+			_, err = fmt.Fprintf(e.stdout, "%s of %s written\n", plural(st.Packets, "packet"), plural(uint64(st.Connections), "connection"))
 			return err
 		},
 	}

@@ -93,8 +93,8 @@ func open(e *env, arg string) (*trace.File, error) {
 
 // scan runs a scan; a damaged file still returns what was read, with the
 // error.
-func scan(cmd *cobra.Command, e *env, arg string, o trace.ScanOptions) (*trace.FileSummary, []trace.Flow, error) {
-	f, err := open(e, arg)
+func scan(cmd *cobra.Command, e *env, args []string, o trace.ScanOptions) (*trace.FileSummary, []trace.Flow, error) {
+	f, err := openInputs(e, args)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -112,7 +112,7 @@ func infoCommand(e *env) *cobra.Command {
 	var sf scanFlags
 	cmd := &cobra.Command{
 		Use:   "info TRACE...",
-		Short: "Describe a trace: format, interfaces, link types, drops, snap length, connections, quality",
+		Short: "Describe each trace file: format, interfaces, link types, drops, snap length, connections, quality",
 		Args:  args(1, -1),
 		RunE: func(cmd *cobra.Command, a []string) error {
 			o, err := sf.options(e)
@@ -122,7 +122,7 @@ func infoCommand(e *env) *cobra.Command {
 			var outs []infoJSON
 			var firstErr error
 			for i, arg := range a {
-				sum, flows, err := scan(cmd, e, arg, o)
+				sum, flows, err := scan(cmd, e, []string{arg}, o) // each file on its own
 				if sum == nil {
 					return err
 				}
@@ -276,13 +276,13 @@ func flowsCommand(e *env) *cobra.Command {
 		all      bool
 	)
 	cmd := &cobra.Command{
-		Use:   "flows TRACE",
+		Use:   "flows TRACE...",
 		Short: "List the TCP flows with their Modbus score, class and roles",
 		Long: `List the TCP flows of a trace with their Modbus/TCP assessment. By default only
 flows classed modbus_tcp, or scoring at least --min-score, are listed; --all
 lists every TCP flow. Non-standard ports are found this way: the class comes
-from the traffic, not from the port.`,
-		Args: args(1, 1),
+from the traffic, not from the port. Several files are one trace.`,
+		Args: args(1, -1),
 		RunE: func(cmd *cobra.Command, a []string) error {
 			if minScore < 0 || minScore > 1 {
 				return usageErr("--min-score %v: between 0 and 1", minScore)
@@ -291,7 +291,7 @@ from the traffic, not from the port.`,
 			if err != nil {
 				return err
 			}
-			_, flows, scanErr := scan(cmd, e, a[0], o)
+			_, flows, scanErr := scan(cmd, e, a, o)
 			if flows == nil && scanErr != nil {
 				return scanErr
 			}

@@ -43,6 +43,7 @@ const (
 	OpenMidstream                 // the capture started during the connection
 )
 
+// String returns how the connection opened, as the JSON output names it.
 func (o Open) String() string {
 	switch o {
 	case OpenSYN:
@@ -67,8 +68,13 @@ const (
 	CloseSuper              // superseded by a new epoch of the same 4-tuple
 )
 
+// String returns how the connection closed, as the JSON output names it.
 func (c Close) String() string {
-	return [...]string{"", "fin", "rst", "end_of_trace", "evicted", "superseded"}[c]
+	names := [...]string{"", "fin", "rst", "end_of_trace", "evicted", "superseded"}
+	if int(c) >= len(names) {
+		return "unknown"
+	}
+	return names[c]
 }
 
 // GapKind says why bytes are missing.
@@ -82,8 +88,13 @@ const (
 	GapBudget                      // the total buffer budget was reached
 )
 
+// String returns the gap kind as the JSON output names it.
 func (g GapKind) String() string {
-	return [...]string{"", "loss", "snaplen", "reassembly_overflow", "reassembly_budget"}[g]
+	names := [...]string{"", "loss", "snaplen", "reassembly_overflow", "reassembly_budget"}
+	if int(g) >= len(names) {
+		return "unknown"
+	}
+	return names[g]
 }
 
 // Chunk is where delivered bytes come from.
@@ -116,7 +127,6 @@ type ConnStats struct {
 	Keepalives  uint64
 	Gaps        uint64
 	GapBytes    uint64
-	UnknownGaps uint64 // gaps of unknown size (counted in Gaps too)
 	SnapBytes   uint64 // payload bytes cut by the snap length
 	SYNRetrans  uint64
 }
@@ -143,9 +153,6 @@ type Conn struct {
 	prev, next *Conn // LRU list
 }
 
-// Pos returns the stream position of direction d's next byte.
-func (c *Conn) Pos(d int) uint64 { return c.dirs[d].pos }
-
 type key struct{ a, b netip.AddrPort }
 
 func keyOf(s, d netip.AddrPort) key {
@@ -160,7 +167,13 @@ type pending struct {
 	data    []byte
 	missing uint32
 	ch      Chunk
+	cost    int // len(data) + heldOverhead, charged against the limits
 }
+
+// heldOverhead is charged per held segment besides its bytes, so empty or
+// tiny segments (snap-length cuts, one-byte writes) cannot fill the buffer
+// for free: a direction holds at most BufferPerDir/heldOverhead segments.
+const heldOverhead = 128
 
 type half struct {
 	started  bool
@@ -226,9 +239,6 @@ func NewTracker(l Limits, h Handler) *Tracker {
 	t.lru.prev, t.lru.next = &t.lru, &t.lru
 	return t
 }
-
-// Tracked returns the number of connections in the table.
-func (t *Tracker) Tracked() int { return len(t.conns) }
 
 func seqLT(a, b uint32) bool { return int32(a-b) < 0 }
 
@@ -451,7 +461,9 @@ func (t *Tracker) accept(c *Conn, d int, seq uint32, b []byte, missing uint32, c
 		t.skip(c, d, int64(missing), GapSnaplen)
 		c.Stats.SnapBytes += uint64(missing)
 	}
-	t.drain(c, d, true)
+	if !held {
+		t.drain(c, d, true) // a held segment is delivered by drain's own loop: no recursion per segment
+	}
 }
 
 // hold buffers future bytes within the per-direction and total limits.
@@ -463,13 +475,14 @@ func (t *Tracker) hold(c *Conn, d int, seq uint32, b []byte, missing uint32, ch 
 		t.accept(c, d, seq, b, missing, ch, false)
 		return
 	}
-	if h.pendLen+len(b) > t.L.BufferPerDir && len(h.pend) > 0 {
+	cost := len(b) + heldOverhead
+	if h.pendLen+cost > t.L.BufferPerDir && len(h.pend) > 0 {
 		t.Stats.Overflows++
 		t.gapTo(c, d, h.pend[0].seq, GapOverflow)
 		t.accept(c, d, seq, b, missing, ch, false) // delivers, holds again, or overflows again
 		return
 	}
-	for t.pendAll+len(b) > t.L.BufferTotal {
+	for t.pendAll+cost > t.L.BufferTotal {
 		v := t.largest()
 		if v == nil {
 			break
@@ -489,9 +502,9 @@ func (t *Tracker) hold(c *Conn, d int, seq uint32, b []byte, missing uint32, ch 
 	i := sort.Search(len(h.pend), func(i int) bool { return seqLT(seq, h.pend[i].seq) })
 	h.pend = append(h.pend, pending{})
 	copy(h.pend[i+1:], h.pend[i:])
-	h.pend[i] = pending{seq: seq, data: append([]byte(nil), b...), missing: missing, ch: ch}
-	h.pendLen += len(b)
-	t.pendAll += len(b)
+	h.pend[i] = pending{seq: seq, data: append([]byte(nil), b...), missing: missing, ch: ch, cost: cost}
+	h.pendLen += cost
+	t.pendAll += cost
 }
 
 // largest returns the connection holding the most buffered bytes in one
@@ -533,8 +546,8 @@ func (t *Tracker) drain(c *Conn, d int, filled bool) {
 	for len(h.pend) > 0 && !seqLT(h.next, h.pend[0].seq) {
 		q := h.pend[0]
 		h.pend = h.pend[1:]
-		h.pendLen -= len(q.data)
-		t.pendAll -= len(q.data)
+		h.pendLen -= q.cost
+		t.pendAll -= q.cost
 		if filled && t.gapping == 0 {
 			c.Stats.OutOfOrder++
 			q.ch.OutOfOrder = true
@@ -648,7 +661,6 @@ func (s *Stats) Fold(c *Conn) {
 	x.Keepalives += y.Keepalives
 	x.Gaps += y.Gaps
 	x.GapBytes += y.GapBytes
-	x.UnknownGaps += y.UnknownGaps
 	x.SnapBytes += y.SnapBytes
 	x.SYNRetrans += y.SYNRetrans
 }

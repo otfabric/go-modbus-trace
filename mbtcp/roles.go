@@ -19,8 +19,13 @@ const (
 	RoleStructure                   // requests parse as requests and responses pair with them
 )
 
+// String returns the role source as the JSON output names it.
 func (r RoleSource) String() string {
-	return [...]string{"unknown", "override", "syn", "port", "structure"}[r]
+	names := [...]string{"unknown", "override", "syn", "port", "structure"}
+	if int(r) >= len(names) {
+		return "unknown"
+	}
+	return names[r]
 }
 
 // Guessed reports a role taken from a port without a handshake, or from

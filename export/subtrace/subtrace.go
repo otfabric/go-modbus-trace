@@ -9,7 +9,7 @@ package subtrace
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"io"
 	"time"
 
@@ -37,11 +37,16 @@ type Stats struct {
 	NoTime      uint64 `json:"packets_without_time"` // written with time 0 (pcapng simple packets)
 }
 
+// ErrTransactionSelection is returned for a selection with
+// transaction-level fields (units, functions, statuses, flags, ranges): a
+// packet can carry several transactions, so they do not select packets.
+var ErrTransactionSelection = errors.New("subtrace: a sub-trace selects connections and a time window, not transactions")
+
 // Extract reads f once and writes the selected packets to w.
 func Extract(ctx context.Context, f *trace.File, o trace.ScanOptions, so Options, w io.Writer) (Stats, error) {
 	sel := so.Selection
 	if len(sel.Units)+len(sel.Functions)+len(sel.Statuses)+len(sel.Classes)+len(sel.Require)+len(sel.Exclude) > 0 || sel.Space != "" {
-		return Stats{}, fmt.Errorf("subtrace: a sub-trace selects connections and a time window, not transactions")
+		return Stats{}, ErrTransactionSelection
 	}
 	comment := "selection: " + sel.String()
 	if sel.String() == "" {

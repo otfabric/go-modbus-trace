@@ -21,9 +21,22 @@ type part struct {
 }
 
 type datagram struct {
-	parts []part
-	total int // -1 until the last fragment is seen
-	size  int
+	parts []part // sorted by offset
+	total int    // -1 until the last fragment is seen
+	size  int    // bytes charged: data plus overheads
+	gen   uint64
+}
+
+// Overheads charged against the budget besides the fragment bytes, so tiny
+// fragments cannot hold millions of entries within it.
+const (
+	fragOverhead     = 64
+	datagramOverhead = 128
+)
+
+type orderKey struct {
+	k   FragKey
+	gen uint64
 }
 
 // Defrag reassembles IPv4 and IPv6 fragments within a total byte budget.
@@ -33,7 +46,8 @@ type Defrag struct {
 	max   int
 	used  int
 	m     map[FragKey]*datagram
-	order []FragKey
+	order []orderKey // oldest first; entries of finished datagrams are skipped lazily
+	gen   uint64
 	// Counters.
 	Datagrams uint64 // datagrams reassembled
 	Dropped   uint64 // incomplete datagrams dropped by the budget
@@ -52,9 +66,11 @@ func (f *Defrag) Add(k FragKey, off int, more bool, data []byte) ([]byte, Reason
 	}
 	d := f.m[k]
 	if d == nil {
-		d = &datagram{total: -1}
+		f.gen++
+		d = &datagram{total: -1, gen: f.gen, size: datagramOverhead}
 		f.m[k] = d
-		f.order = append(f.order, k)
+		f.order = append(f.order, orderKey{k, f.gen})
+		f.used += datagramOverhead
 		f.Pending++
 	}
 	switch {
@@ -66,17 +82,24 @@ func (f *Defrag) Add(k FragKey, off int, more bool, data []byte) ([]byte, Reason
 	if d.total >= 0 && end > d.total {
 		return nil, FragmentBad
 	}
-	d.parts = append(d.parts, part{off, append([]byte(nil), data...)})
-	d.size += len(data)
-	f.used += len(data)
+	// After the parts with the same offset: the earlier fragment wins.
+	i := sort.Search(len(d.parts), func(i int) bool { return d.parts[i].off > off })
+	d.parts = append(d.parts, part{})
+	copy(d.parts[i+1:], d.parts[i:])
+	d.parts[i] = part{off, append([]byte(nil), data...)}
+	d.size += len(data) + fragOverhead
+	f.used += len(data) + fragOverhead
 	for f.used > f.max && len(f.order) > 0 {
-		f.drop(f.order[0])
-		f.Dropped++
+		o := f.order[0]
+		f.order = f.order[1:]
+		if x := f.m[o.k]; x != nil && x.gen == o.gen {
+			f.drop(o.k)
+			f.Dropped++
+		}
 	}
-	if f.m[k] == nil || d.total < 0 {
+	if f.m[k] != d || d.total < 0 {
 		return nil, FragmentHeld
 	}
-	sort.SliceStable(d.parts, func(i, j int) bool { return d.parts[i].off < d.parts[j].off })
 	have := 0
 	for _, p := range d.parts {
 		if p.off > have {
@@ -106,10 +129,13 @@ func (f *Defrag) drop(k FragKey) {
 		delete(f.m, k)
 		f.Pending--
 	}
-	for i, o := range f.order {
-		if o == k {
-			f.order = append(f.order[:i], f.order[i+1:]...)
-			break
+	if len(f.order) > 2*len(f.m)+64 { // forget finished datagrams
+		live := f.order[:0]
+		for _, o := range f.order {
+			if x := f.m[o.k]; x != nil && x.gen == o.gen {
+				live = append(live, o)
+			}
 		}
+		f.order = live
 	}
 }

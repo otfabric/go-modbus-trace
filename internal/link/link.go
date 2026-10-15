@@ -15,12 +15,12 @@ import (
 // Link types (LINKTYPE_ values).
 const (
 	LinkNull     = 0   // BSD loopback, family in host byte order
-	LinkEthernet = 1   //
+	LinkEthernet = 1   // Ethernet II, with 802.1Q and QinQ tags
 	LinkRaw      = 101 // raw IP, version from the first nibble
 	LinkLoop     = 108 // OpenBSD loopback, family in network byte order
 	LinkSLL      = 113 // Linux cooked capture v1
-	LinkIPv4     = 228
-	LinkIPv6     = 229
+	LinkIPv4     = 228 // raw IPv4
+	LinkIPv6     = 229 // raw IPv6
 	LinkSLL2     = 276 // Linux cooked capture v2
 )
 
@@ -70,6 +70,7 @@ const (
 var reasonNames = [NumReasons]string{"ok", "fragment_held", "link_unsupported", "not_ip", "not_tcp", "tunnel", "ipsec",
 	"short", "bad_header", "ipv6_ext_headers", "fragment_bad"}
 
+// String returns the reason as the file summary names it.
 func (r Reason) String() string {
 	if r < NumReasons {
 		return reasonNames[r]
@@ -107,6 +108,10 @@ const MaxExtHeaders = 8
 type Decoder struct {
 	frag   *Defrag
 	Counts [NumReasons]uint64
+	// Frag is the datagram of the last decoded packet when Fragment is
+	// set: the packet was an IP fragment (held, or completing it).
+	Frag     FragKey
+	Fragment bool
 }
 
 // NewDecoder returns a decoder whose fragment reassembly holds at most
@@ -120,6 +125,7 @@ func (d *Decoder) Defrag() *Defrag { return d.frag }
 
 // Decode decodes one packet of the given link type into s.
 func (d *Decoder) Decode(linkType uint16, data []byte, s *Segment) Reason {
+	d.Fragment = false
 	r := d.decode(linkType, data, s)
 	d.Counts[r]++
 	return r
@@ -219,6 +225,7 @@ func (d *Decoder) decode(linkType uint16, b []byte, s *Segment) Reason {
 				return Short // a cut fragment cannot be reassembled
 			}
 			k := FragKey{Src: src, Dst: dst, ID: uint32(binary.BigEndian.Uint16(b[4:])), Proto: proto}
+			d.Frag, d.Fragment = k, true
 			whole, r := d.frag.Add(k, int(fo&0x1FFF)*8, fo&0x2000 != 0, b[ihl:total])
 			if r != OK {
 				return r
@@ -246,6 +253,9 @@ func (d *Decoder) decode(linkType uint16, b []byte, s *Segment) Reason {
 		b = b[40:min(40+plen, len(b))]
 		payOff = 0
 		for i := 0; ; i++ {
+			if i > MaxExtHeaders && (next == 44 || isExtHeader(next)) {
+				return ExtHeaders // fragment headers count too: a nested chain is bounded
+			}
 			if next == 44 { // Fragment header
 				if len(b) < 8 {
 					return Short
@@ -255,6 +265,7 @@ func (d *Decoder) decode(linkType uint16, b []byte, s *Segment) Reason {
 				}
 				fo := binary.BigEndian.Uint16(b[2:])
 				k := FragKey{Src: src, Dst: dst, ID: binary.BigEndian.Uint32(b[4:]), Proto: b[0], V6: true}
+				d.Frag, d.Fragment = k, true
 				whole, r := d.frag.Add(k, int(fo>>3)*8, fo&1 != 0, b[8:])
 				if r != OK {
 					return r
