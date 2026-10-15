@@ -365,3 +365,83 @@ func TestReadRangesOnResponses(t *testing.T) {
 		t.Error("conn.open first")
 	}
 }
+
+// TestUndecidedRoles: a midstream connection on a non-standard port holds
+// its ADUs (and a gap) until the structure test decides, then replays them
+// in order; a connection that never decides reports role_unknown.
+func TestUndecidedRoles(t *testing.T) {
+	odd := netip.MustParseAddrPort("10.0.0.9:1502")
+	data, _ := build(t, tracetest.Options{}, func(b *tracetest.Builder) {
+		c := b.Conn(tracetest.ConnOptions{Midstream: true, Server: odd})
+		c.Write(tracetest.ToClient, tracetest.WriteOpts{Lose: []int{0}}, tracetest.Frame{TID: 99, Unit: 1, PDU: resp3(1)})
+		for i := range 25 {
+			c.Request(uint16(i), 1, rd3)
+			c.Response(uint16(i), 1, resp3(uint16(i)))
+		}
+		u := b.Conn(tracetest.ConnOptions{Midstream: true, Client: netip.MustParseAddrPort("10.0.0.8:41000"), Server: netip.MustParseAddrPort("10.0.0.9:7")})
+		u.Write(tracetest.ToServer, tracetest.WriteOpts{}, tracetest.Frame{TID: 1, Unit: 1, PDU: []byte{0x41, 1}})
+		u.Write(tracetest.ToClient, tracetest.WriteOpts{}, tracetest.Frame{TID: 2, Unit: 1, PDU: []byte{0x41, 2}})
+	})
+	_, evs := analyze(t, data, Options{})
+	var c1, c2 []string
+	for _, e := range evs {
+		var id uint32
+		var s string
+		switch {
+		case e.Conn != nil:
+			id, s = e.Conn.ID, e.Kind+":"+e.Conn.RoleSource
+		case e.Txn != nil:
+			id, s = e.Txn.Conn, e.Txn.Status
+		case e.Gap != nil:
+			id, s = e.Gap.Conn, "gap"
+		case e.Resync != nil:
+			id, s = e.Resync.Conn, "resync"
+		}
+		if id == 1 {
+			c1 = append(c1, s)
+		} else {
+			c2 = append(c2, s)
+		}
+	}
+	if len(c1) < 4 || c1[0] != "conn.open:structure" || c1[1] != "ok" || c1[len(c1)-1] != "conn.close:structure" {
+		t.Errorf("connection 1: %v", c1)
+	}
+	if strings.Join(c2, " ") != "conn.open:unknown uncertain uncertain conn.close:unknown" {
+		t.Errorf("connection 2: %v", c2)
+	}
+	for _, x := range txns(evs) {
+		if x.Conn == 2 && !hasFlagT(x, model.FlagRoleUnknown) {
+			t.Errorf("%+v", x)
+		}
+	}
+}
+
+func hasFlagT(t *model.Transaction, f string) bool { return slices.Contains(t.Flags, f) }
+
+// TestNotes: trace-level facts become notes at the end.
+func TestNotes(t *testing.T) {
+	data, _ := build(t, tracetest.Options{Format: tracetest.PcapNG, SnapLen: 70}, func(b *tracetest.Builder) {
+		c := b.Conn(tracetest.ConnOptions{})
+		c.Request(1, 1, rd3)
+		c.Response(1, 1, tracetest.RegistersResponse(3, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10))
+		b.InterfaceDrops(0, 5)
+		b.UDP(0, client, server, []byte("x"))
+	})
+	_, evs := analyze(t, data, Options{})
+	var codes []string
+	for _, e := range evs {
+		if e.Note != nil {
+			codes = append(codes, e.Note.Code)
+		}
+	}
+	if strings.Join(codes, " ") != "capture_drops snaplen unsupported" {
+		t.Errorf("notes %v", codes)
+	}
+	// A damaged file ends with a note too.
+	bad := append([]byte(nil), data...)
+	bad = append(bad[:len(bad)-3], 0xFF, 0xFF, 0xFF)
+	_, evs = analyze(t, bad, Options{})
+	if e := evs[len(evs)-1]; e.Note == nil || e.Note.Code != "damaged_file" {
+		t.Errorf("last event %+v", e)
+	}
+}

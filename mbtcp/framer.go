@@ -117,8 +117,11 @@ type Framer struct {
 	pos    uint64 // stream position of buf[0]
 	resync bool
 	scan   int // bytes scanned in the current resync
-	drop   int // bytes of a truncated ADU still to drop
-	adu    ADU
+	// A truncated ADU's bytes after the cut are dropped up to dropEnd (a
+	// stream position), whatever gaps come in between.
+	dropEnd uint64
+	hasDrop bool
+	adu     ADU
 }
 
 // NewFramer returns a framer; limit 0 means DefaultResyncLimit.
@@ -136,12 +139,16 @@ func (f *Framer) Write(pos uint64, b []byte) {
 	if len(f.buf) == 0 {
 		f.pos = pos
 	}
-	if f.drop > 0 {
-		n := min(f.drop, len(b))
-		f.drop -= n
-		b, pos = b[n:], pos+uint64(n)
-		if len(f.buf) == 0 {
-			f.pos = pos
+	if f.hasDrop {
+		if pos < f.dropEnd {
+			n := int(min(f.dropEnd-pos, uint64(len(b))))
+			b, pos = b[n:], pos+uint64(n)
+			if len(f.buf) == 0 {
+				f.pos = pos
+			}
+		}
+		if pos >= f.dropEnd {
+			f.hasDrop = false
 		}
 	}
 	f.buf = append(f.buf, b...)
@@ -153,25 +160,28 @@ func (f *Framer) Write(pos uint64, b []byte) {
 // ADU cut that way is reported Truncated and framing stays in sync when
 // the cut ends inside it. Any other gap starts a resync.
 func (f *Framer) Gap(pos uint64, n int64, exact bool) {
-	if exact && f.drop > 0 {
-		k := min(int64(f.drop), n)
-		f.drop -= int(k)
-		n -= k
-		if n == 0 {
-			return
+	if f.hasDrop {
+		end := pos + uint64(n)
+		if end <= f.dropEnd {
+			return // inside the rest of a truncated ADU: nothing more is lost
 		}
+		if pos < f.dropEnd {
+			pos, n = f.dropEnd, int64(end-f.dropEnd)
+		}
+		f.hasDrop = false
 	}
 	if exact && !f.resync && len(f.buf) >= HeaderLen {
 		h, _ := ParseHeader(f.buf)
 		have := len(f.buf)
 		if (h.Valid() || h.LengthOK()) && have < h.Size() {
 			cut := min(int64(h.Size()-have), n)
+			start := f.pos
 			f.emit(h, have, h.Size()-have, Truncated) // the PDU lacks every byte after the cut
 			f.buf = f.buf[:0]
 			if n == cut {
 				// The cut ended inside the ADU: the rest of it is still
 				// to come, and the next ADU starts after it.
-				f.drop = h.Size() - have - int(cut)
+				f.dropEnd, f.hasDrop = start+uint64(h.Size()), true
 				f.pos = pos + uint64(n)
 				return
 			}
@@ -183,7 +193,6 @@ func (f *Framer) Gap(pos uint64, n int64, exact bool) {
 		f.sink.Junk(f.pos, len(f.buf), Incomplete)
 		f.buf = f.buf[:0]
 	}
-	f.drop = 0
 	f.resync, f.scan = true, 0
 	f.pos = pos + uint64(n)
 }

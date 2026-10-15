@@ -53,3 +53,24 @@ func TestMatch(t *testing.T) {
 		t.Errorf("String %q", got)
 	}
 }
+
+func TestStringAndEmpty(t *testing.T) {
+	if !(&Selection{}).Empty() {
+		t.Error("an empty selection")
+	}
+	from := time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)
+	s := Selection{Servers: []netip.AddrPort{netip.MustParseAddrPort("10.0.0.2:502")}, Clients: []netip.Addr{netip.MustParseAddr("10.0.0.1")},
+		Conns: []uint32{3}, Statuses: []string{"ok"}, Classes: []string{"read"}, Require: []string{"slow"}, Exclude: []string{"midstream"},
+		From: &from, To: &from}
+	want := "server=10.0.0.2:502; client=10.0.0.1; conn=3; status=ok; class=read; flag=slow; no-flag=midstream; from=2026-10-15T08:00:00Z; to=2026-10-15T08:00:00Z"
+	if got := s.String(); got != want || s.Empty() {
+		t.Errorf("String %q", got)
+	}
+	if !s.MatchConn(3, netip.MustParseAddrPort("10.0.0.1:1"), netip.MustParseAddrPort("10.0.0.2:502")) ||
+		s.MatchConn(4, netip.MustParseAddrPort("10.0.0.1:1"), netip.MustParseAddrPort("10.0.0.2:502")) {
+		t.Error("MatchConn")
+	}
+	if (&s).Match(&model.Transaction{Conn: 3, Client: netip.MustParseAddrPort("10.0.0.1:1"), Server: netip.MustParseAddrPort("10.0.0.2:502")}) {
+		t.Error("a transaction without a time is outside a time window")
+	}
+}

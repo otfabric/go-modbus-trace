@@ -1,0 +1,4 @@
+# Generated files and test data are compared byte for byte: keep LF everywhere.
+* text=auto eol=lf
+*.pcap binary
+*.pcapng binary

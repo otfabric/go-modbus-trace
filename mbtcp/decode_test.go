@@ -135,6 +135,23 @@ func TestValidation(t *testing.T) {
 		{"exception code unknown", AsResponse, []byte{0x83, 0x42}, WarnExceptionCode},
 		{"exception length", AsResponse, []byte{0x83, 2, 0}, WarnLength},
 		{"exception as a request", AsRequest, []byte{0x83, 2}, WarnNotRequest},
+		{"FC01 byte count 0", AsResponse, []byte{1, 0}, WarnByteCount},
+		{"FC01 response cut", AsResponse, []byte{1}, WarnTruncated},
+		{"FC17 byte count", AsResponse, []byte{17, 3, 1}, WarnByteCount},
+		{"FC12 byte count", AsResponse, []byte{12, 5, 0, 0, 0, 0, 0, 0}, WarnByteCount},
+		{"FC20 response byte count", AsResponse, []byte{20, 2, 1, 6}, WarnByteCount},
+		{"FC20 response reference type", AsResponse, []byte{20, 4, 3, 5, 0, 1}, WarnReferenceType},
+		{"FC20 response record length", AsResponse, []byte{20, 4, 2, 6, 0, 1}, WarnRecord},
+		{"FC20 response record cut", AsResponse, []byte{20, 3, 9}, WarnRecord},
+		{"FC21 data cut", AsRequest, []byte{21, 9, 6, 0, 4, 0, 7, 0, 9, 0, 1}, WarnRecord},
+		{"FC20 record number", AsRequest, []byte{20, 7, 6, 0, 4, 0x27, 0x10, 0, 2}, WarnRecord},
+		{"FC24 response byte count", AsResponse, []byte{24, 0, 9, 0, 2, 1, 2, 3, 4}, WarnByteCount},
+		{"FC43/14 more follows", AsResponse, []byte{43, 14, 1, 1, 7, 0, 0}, WarnMEIStructure},
+		{"FC43/14 trailing bytes", AsResponse, []byte{43, 14, 1, 1, 0, 0, 0, 9}, WarnMEIStructure},
+		{"FC43/14 object header cut", AsResponse, []byte{43, 14, 1, 1, 0, 0, 1, 0}, WarnMEIStructure},
+		{"FC43/14 response code", AsResponse, []byte{43, 14, 0, 1, 0, 0, 0}, WarnReadDeviceCode},
+		{"FC43/14 response cut", AsResponse, []byte{43, 14, 1}, WarnTruncated},
+		{"FC43 request cut", AsRequest, []byte{43}, WarnTruncated},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -158,6 +175,20 @@ func TestOpaqueAndExceptions(t *testing.T) {
 	v = Decode(AsRequest, []byte{43, 13, 0xAA})
 	if v.Name != "CANopen General Reference" || v.Class != ClassOther || *v.Sub != 13 {
 		t.Errorf("MEI 13: %+v", v)
+	}
+	if v = Decode(AsResponse, []byte{43, 13, 0xBB}); v.Name != "CANopen General Reference" || fields(v) != "mei_type=13 data=bb" {
+		t.Errorf("MEI 13 response: %+v", v)
+	}
+	if v = Decode(AsResponse, []byte{43, 99}); v.Name != "Encapsulated Interface Transport" || v.Class != ClassOther {
+		t.Errorf("MEI 99: %+v", v)
+	}
+	for _, sub := range []uint16{1, 3, 4, 10, 20, 99} {
+		if DiagnosticsAdmissible(sub) {
+			t.Errorf("FC08/%d is not a read", sub)
+		}
+	}
+	if ExceptionName(0x0B) == "" || ExceptionName(0x09) != "" || !SerialOnly(0x88) || SerialOnly(3) {
+		t.Error("tables")
 	}
 	v = Decode(AsRequest, []byte{8, 0, 1, 0, 0})
 	if v.Class != ClassOther || DiagnosticsAdmissible(*v.Sub) {
@@ -258,6 +289,7 @@ func TestCoverageDoc(t *testing.T) {
 		return
 	}
 	have, err := os.ReadFile(path)
+	have = bytes.ReplaceAll(have, []byte("\r\n"), []byte("\n")) // a Windows checkout may convert line endings
 	if err != nil || !bytes.Equal(have, b.Bytes()) {
 		t.Fatalf("docs/COVERAGE.md is not up to date: run make golden (%v)", err)
 	}
