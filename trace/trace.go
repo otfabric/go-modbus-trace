@@ -38,6 +38,7 @@ type File struct {
 	size   int64
 	stream io.Reader
 	used   bool
+	index  frameIndex // for Frames
 }
 
 // Open opens a trace file by path. Nothing is read until a pass runs.

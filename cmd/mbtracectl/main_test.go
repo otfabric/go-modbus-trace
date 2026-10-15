@@ -149,3 +149,78 @@ func TestEnvironment(t *testing.T) {
 		t.Errorf("a bad environment value: exit %d", code)
 	}
 }
+
+func TestSummary(t *testing.T) {
+	path, _ := fixture(t)
+	code, out, errs := cli(t, nil, "summary", path)
+	if code != exitOK || !strings.Contains(out, "transactions: ok=4") || !strings.Contains(out, "10.0.0.2:1502  1") {
+		t.Fatalf("exit %d, stderr %q, output:\n%s", code, errs, out)
+	}
+	code, out, _ = cli(t, nil, "summary", "--json", "--fc", "3", path)
+	var doc struct {
+		Selection string `json:"selection"`
+		Devices   []struct {
+			Server       string `json:"server"`
+			Transactions int    `json:"transactions"`
+		} `json:"devices"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != exitOK {
+		t.Fatalf("%v %d", err, code)
+	}
+	if doc.Selection != "fc=3" || len(doc.Devices) != 1 || doc.Devices[0].Transactions != 4 {
+		t.Errorf("%+v", doc)
+	}
+}
+
+func TestTimeline(t *testing.T) {
+	path, data := fixture(t)
+	code, out, _ := cli(t, nil, "timeline", path)
+	if code != exitOK || strings.Count(out, "Read 2 holding registers @ 100") != 4 {
+		t.Fatalf("exit %d:\n%s", code, out)
+	}
+	_, csvOut, _ := cli(t, nil, "timeline", "--format", "csv", "--tid-not-a-flag", path)
+	if csvOut != "" {
+		t.Error("an unknown flag must not write output")
+	}
+	_, fromFile, _ := cli(t, nil, "timeline", "--format", "jsonl", path)
+	_, fromStdin, _ := cli(t, data, "timeline", "--format", "jsonl", "-")
+	if fromFile == "" || fromFile != fromStdin {
+		t.Error("stdin and file differ")
+	}
+	if code, _, _ := cli(t, nil, "timeline", "--order", "sideways", path); code != exitUsage {
+		t.Errorf("bad --order: exit %d", code)
+	}
+	if code, _, _ := cli(t, nil, "timeline", "--range", "holding:9-1", path); code != exitUsage {
+		t.Errorf("bad --range: exit %d", code)
+	}
+}
+
+func TestExportTimeline(t *testing.T) {
+	path, _ := fixture(t)
+	dir := filepath.Dir(path)
+	out := filepath.Join(dir, "tl.csv")
+	if code, _, errs := cli(t, nil, "export", "timeline", path, "-o", out, "--status", "ok"); code != exitOK {
+		t.Fatalf("exit %d: %s", code, errs)
+	}
+	b, _ := os.ReadFile(out)
+	if !strings.HasPrefix(string(b), "kind,seq,time,") || strings.Count(string(b), "\ntxn,") != 4 {
+		t.Errorf("csv:\n%s", b)
+	}
+	if code, _, _ := cli(t, nil, "export", "timeline", path, "-o", path, "--format", "jsonl"); code != exitUsage {
+		t.Errorf("output = input: exit %d", code)
+	}
+	if code, _, _ := cli(t, nil, "export", "timeline", path, "-o", filepath.Join(dir, "x.txt")); code != exitUsage {
+		t.Errorf("unknown extension: exit %d", code)
+	}
+	// A failure leaves no partial output, and no temporary file.
+	bad := filepath.Join(dir, "bad.jsonl")
+	if code, _, _ := cli(t, []byte("not a trace at all"), "export", "timeline", "-", "-o", bad); code != exitError {
+		t.Errorf("bad input: exit %d", code)
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if e.Name() == "bad.jsonl" || strings.HasSuffix(e.Name(), ".tmp") {
+			t.Errorf("left behind: %s", e.Name())
+		}
+	}
+}

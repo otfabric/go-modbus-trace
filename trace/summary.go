@@ -35,6 +35,10 @@ type FileSummary struct {
 	InternalErrors []InternalError `json:"internal_errors,omitempty"`
 	// Error is set when the read ended early on a damaged file.
 	Error string `json:"error,omitempty"`
+	// Transactions and TransactionFlags count the transactions by status
+	// and by quality flag (Analyze only).
+	Transactions     map[string]uint64 `json:"transactions,omitempty"`
+	TransactionFlags map[string]uint64 `json:"transaction_flags,omitempty"`
 }
 
 // Interface is a capture interface.

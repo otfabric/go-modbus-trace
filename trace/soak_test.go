@@ -8,16 +8,18 @@ import (
 	"io"
 	"net/netip"
 	"os"
-	"runtime"
+	"runtime/metrics"
 	"strconv"
 	"testing"
 
+	"github.com/otfabric/go-modbus-trace/model"
 	"github.com/otfabric/go-modbus-trace/trace/tracetest"
 )
 
 // TestSoak is LA14's memory half: a generated stream (never stored) of
 // MBTRACE_SOAK GiB, 1,000 connections polling with losses, reordering and
-// retransmissions, goes through Scan with flat memory. Run with
+// retransmissions, goes through Analyze (pairing, decoding, provenance) with
+// flat memory. Run with
 // MBTRACE_SOAK=5 (make soak); skipped otherwise.
 func TestSoak(t *testing.T) {
 	gib, err := strconv.Atoi(os.Getenv("MBTRACE_SOAK"))
@@ -61,20 +63,24 @@ func TestSoak(t *testing.T) {
 		_ = pw.Close()
 	}()
 	var maxHeap, samples uint64
-	var ms runtime.MemStats
-	opts := ScanOptions{Progress: func(read, _ int64) {
+	live := []metrics.Sample{{Name: "/gc/heap/live:bytes"}} // live heap after the last GC
+	opts := Options{ScanOptions: ScanOptions{Progress: func(read, _ int64) {
 		if samples++; samples%16 == 0 { // every 64 MiB
-			runtime.ReadMemStats(&ms)
-			maxHeap = max(maxHeap, ms.HeapInuse)
+			metrics.Read(live)
+			maxHeap = max(maxHeap, live[0].Value.Uint64())
 		}
-	}}
-	sum, flows, err := Scan(context.Background(), OpenReader(pr), opts)
+	}}}
+	var events uint64
+	sum, err := Analyze(context.Background(), OpenReader(pr), opts, SinkFunc(func(*model.Event) error {
+		events++
+		return nil
+	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("%d packets, %d flows, %d gaps, max heap in use %d MiB", sum.Packets, len(flows), sum.Quality.Gaps, maxHeap>>20)
-	if maxHeap > 128<<20 {
-		t.Errorf("heap reached %d MiB", maxHeap>>20)
+	t.Logf("%d packets, %d events, %v, %d gaps, max live heap %d MiB", sum.Packets, events, sum.Transactions, sum.Quality.Gaps, maxHeap>>20)
+	if maxHeap > 64<<20 {
+		t.Errorf("the live heap reached %d MiB", maxHeap>>20)
 	}
 }
 

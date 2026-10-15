@@ -62,3 +62,35 @@ The meaning of every counter is in `ARCHITECTURE.md` sections 4 to 7 and 11.
 ```json
 {"build_date": "...", "commit": "...", "tag": "v0.1.0", "version": "0.1.0"}
 ```
+
+## `summary`
+
+```json
+{
+  "schema_version": 1,
+  "selection": "fc=3",
+  "summary": {"...": "as in info, plus:", "transactions": {"ok": 1325, "orphan_response": 1, "unanswered": 1},
+              "transaction_flags": {"midstream": 1327, "role_guessed": 1327}},
+  "devices": [{
+    "server": "10.0.0.2:502", "unit": 1, "transactions": 4934,
+    "statuses": {"ok": 4834, "uncertain": 100}, "functions": {"3": 4934},
+    "clients": ["10.0.0.0", "10.0.0.4"], "first": "...", "last": "...", "max_latency_ns": 274000
+  }]
+}
+```
+
+`selection` is the canonical form of the selection flags (absent when everything is selected). `devices`
+are the server endpoints and units with at least one selected transaction, ordered by server and unit;
+`functions` counts by function code (decimal, as a string key).
+
+## `timeline --format jsonl`, `export timeline` to `.jsonl`
+
+One event per line, exactly as `trace.Analyze` produces it: the JSON Schema is
+[`schema/event-1.schema.json`](schema/event-1.schema.json). `--json` on `timeline` selects this format.
+The CSV form has one row per event with the columns of `timeline.Columns`: `kind`, `seq`, `time`, `conn`,
+`client`, `server`, `unit`, `tid`, `function`, `sub`, `class`, `status`, `exception`, `latency_ns`, `flags`
+and `warnings` (`|`-separated), `summary`, `ranges` (`space:start+count`, `:w` for writes, `;`-separated),
+`request_pdu`, `response_pdu` (hex), `request_frames`, `response_frames` (frame numbers, `;`-separated),
+`request_first`, `request_last`, `response_first`, `response_last`, `role_source`, `open`, `close` (connection
+events), `dir`, `pos`, `bytes`, `reason` (gaps and resyncs: `bytes` is the resync's skipped count and
+`reason` its confidence), `note`.
