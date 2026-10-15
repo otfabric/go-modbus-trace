@@ -5,8 +5,9 @@
   "description": "One event of trace.Analyze (package model), as JSON. Exactly one payload (conn, txn, gap, resync, note) is present; conn.open and conn.close carry conn.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["kind", "seq"],
+  "required": ["schema_version", "kind", "seq"],
   "properties": {
+    "schema_version": {"const": 1},
     "kind": {"enum": ["conn.open", "conn.close", "txn", "gap", "resync", "trace.note"]},
     "seq": {"type": "integer", "minimum": 1},
     "time": {"$ref": "#/$defs/time"},

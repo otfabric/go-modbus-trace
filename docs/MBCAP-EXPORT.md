@@ -13,7 +13,7 @@ How events from a passive trace become an MBCAP file that `modbusctl server repl
 | MBCAP | Content |
 |---|---|
 | `Header.TickNS` | `capture.DefaultTickNS` (1000 ns). `--tick-ns` may lower it (down to 1) for nanosecond traces. A time is `floor((t - WallStart) / TickNS)`. |
-| `Header.WallStart` | The earliest packet timestamp of the trace (of every input, for several files), or the start of the selected time window when one is given. Never `time.Now`. The header is written after the pass (below), so streamed input (stdin) gets the same rule. |
+| `Header.WallStart` | The earliest packet timestamp of the trace (of every input, for several files), or the start of the selected time window when one is given; when that time is before 1970 (a damaged clock), the earliest exported sample. Never `time.Now`. The header is written after the pass (below), so streamed input (stdin) gets the same rule. |
 | `Header.Exceptions` | `true` by default (writers drop exception responses otherwise *(verified)*). `--no-exceptions` turns it off. |
 | `Header.ChangeOnly` | `false` by default: repeated identical responses are kept, so the poll cadence survives. `--change-only` is an explicit derived export; the writer then drops repeated responses and the report counts them (`change_only_dropped`). |
 | `Header.Producer` | e.g. `modbus-trace-explorer 0.1.0 (go-modbus-trace 0.1.0)` or `mbtracectl 0.1.0`, passed in by the caller. |
@@ -28,7 +28,7 @@ Sample order is the order of determination (response completion), which follows 
 
 ## 3. Admission matrix
 
-The exporter classifies every transaction. Only a row marked **yes** is written; everything else is counted under its reason code in the report. The writer must never see an inadmissible sample: an error from a writer is a bug and fails the export loudly (it is never folded into an exclusion counter).
+The exporter classifies every transaction. Only a row marked **yes** is written; everything else is counted under its reason code in the report. The writer must never see an inadmissible sample: every header, target, stream and sample goes through `capture.Checker` first, and a refusal is a bug that fails the export with `ErrWriter` (never folded into an exclusion counter). An error of the writer itself (a full disk) fails the export as an I/O error. Either way the writer is left unfinished, and its output must be discarded (the CLI's temporary file is removed).
 
 | Observed | MBCAP | Reason code if not |
 |---|---|---|
@@ -48,8 +48,9 @@ The exporter classifies every transaction. Only a row marked **yes** is written;
 | Flag `clock_order` (response stamped before its request) | no | `clock_order` |
 | Connection role `unknown` | no | `role_unknown` |
 | Outside the selection or the time window | no | `not_selected`, `outside_window` |
+| Response without a timestamp (pcapng simple packets), or stamped before 1970 (MBCAP cannot hold it) | no | `invalid_time` |
 
-Notes. Flags `retried`, `slow`, `retransmitted`, `out_of_order`, `midstream` and `role_guessed` do **not** exclude a transaction (the content is intact); they are counted in the report so a user can judge. Library acceptance is not proof of a correct transaction: the structural checks come from `mbtcp` (`ARCHITECTURE.md` section 8), and the FC08/MEI/PDU-length rules are reproduced from the library's rules. A property test generates every (function code, sub-function, MEI type) combination and requires the exporter's decision to equal `capture.NewChecker`'s verdict (LA9), so a future change of the library's rules shows up as a failing test.
+Notes. Flags `retried`, `slow`, `retransmitted`, `out_of_order`, `midstream` and `role_guessed` do **not** exclude a transaction (the content is intact); they are counted in the report's `quality` (`retried`, `slow`, `retransmitted`, `out_of_order`, `midstream`, `role_guessed`) so a user can judge. Library acceptance is not proof of a correct transaction: the structural checks come from `mbtcp` (`ARCHITECTURE.md` section 8), and the FC08/MEI/PDU-length rules are reproduced from the library's rules. A property test generates every (function code, sub-function, MEI type) combination and requires the exporter's decision to equal `capture.NewChecker`'s verdict (LA9), so a future change of the library's rules shows up as a failing test.
 
 ## 4. Determinism and IDs
 
@@ -77,7 +78,8 @@ Written next to the capture on request (`--report report.json`) and returned by 
                "streams": [{"id": 1, "client": "10.0.3.5", "samples": 440000}],
                "samples": 440000, "exceptions": 12, "by_function": {"3": 430000, "4": 9988, "43": 12},
                "first": "...", "last": "..."}],
-  "quality": {"retransmitted": 41, "gaps": 0, "resyncs": 0, "snaplen_truncated": 0, "capture_drops": 0},
+  "quality": {"retransmitted": 41, "out_of_order": 3, "retried": 0, "slow": 2, "midstream": 0, "role_guessed": 0,
+              "gaps": 0, "resyncs": 0, "snaplen_truncated": 0, "capture_drops": 0},
   "warnings": [{"code": "format_draft", "text": "..."},
                {"code": "stale_after_write", "target": 1, "space": "holding", "start": 4096, "count": 2, "write_time": "...", "last_read_time": "...", "text": "..."}],
   "replay": {"samples": 880101, "changed_values": 1520331, "estimated_in_memory_bytes": 727390578}
@@ -86,7 +88,7 @@ Written next to the capture on request (`--report report.json`) and returned by 
 
 `excluded` lists every reason code, with 0 for those that did not occur. `first` and `last` of an input are given for a single input. The identity `transactions_seen = samples_written + change_only_dropped + sum(excluded)` holds exactly and is tested (LA9). Timeline events that are not transactions (connection events, gaps) are not counted in `transactions_seen`.
 
-Warning codes: `stale_after_write` (a write to a range after the last exported read of that range: the replay will keep the pre-write value), `capture_drops` (the pcapng interface statistics report drops), `gap_in_window`, `unit_collision` (two targets with the same unit ID: they need separate replay instances, section 6), `role_guessed` (a target whose role came from structure only), `single_sample_target`, `time_disorder`, `format_draft`, `replay_memory` (the estimate below exceeds `--warn-replay-memory`, default 1 GiB, `0` disables it; `DECISIONS.md` Q6). `estimated_in_memory_bytes` is `12 MiB + 750 B × samples + 36 B × changed values`, where changed values counts, per target, every FC01-04 register or coil whose value differs from that address's previous exported sample, plus the bytes of every other response that differs from the previous response to the same request *(verified, L0: modbusctl v3.2.0 keeps every sample and one 16-byte point per changed address; the formula bounds every measurement, 1-30% high, `DECISIONS.md` D6)*. The file size says nothing about it: deflate made a 1.8 MiB file that needs 1.3 GiB to replay.
+Warning codes (constants `mbcapexport.Warn*`): `stale_after_write` (a write to a range after the last exported read of that range: the replay will keep the pre-write value), `capture_drops` (the pcapng interface statistics report drops), `gap_in_window` (selected transactions, inside the exported window, flagged `gap_adjacent` or `resynced`: values near them are missing; `count` says how many), `unit_collision` (two targets with the same unit ID: they need separate replay instances, section 6), `role_guessed` (a target whose role came from structure only), `single_sample_target`, `time_disorder`, `format_draft`, `replay_memory` (the estimate below exceeds `--warn-replay-memory`, default 1 GiB, `0` disables it; `DECISIONS.md` Q6). `estimated_in_memory_bytes` is `12 MiB + 750 B × samples + 36 B × changed values`, where changed values counts, per target, every FC01-04 register or coil whose value differs from that address's previous exported sample, plus the bytes of every other response that differs from the previous response to the same request *(verified, L0: modbusctl v3.2.0 keeps every sample and one 16-byte point per changed address; the formula bounds every measurement, 1-30% high, `DECISIONS.md` D6)*. The file size says nothing about it: deflate made a 1.8 MiB file that needs 1.3 GiB to replay.
 
 ## 6. Replay workflow (source for `docs/REPLAY-WORKFLOW.md`)
 

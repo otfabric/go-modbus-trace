@@ -144,3 +144,41 @@ func TestAfterCloseAndMidstreamACKStart(t *testing.T) {
 		t.Errorf("data %q events %v stats %+v", r.data, r.events, tr.Stats)
 	}
 }
+
+// TestHostileHolding: every held segment costs its overhead, so empty
+// (snap-length cut) segments cannot fill the buffer for free, and a long
+// run of held segments drains in a loop, not one stack frame per segment.
+func TestHostileHolding(t *testing.T) {
+	t.Run("empty segments are charged", func(t *testing.T) {
+		tr := NewTracker(Limits{}, &recorder{})
+		feed(tr, pkt{cl, sv, 100, 0, link.ACK, "x"})
+		for i := range 200_000 {
+			s := link.Segment{Src: netip.MustParseAddrPort(cl), Dst: netip.MustParseAddrPort(sv), Seq: uint32(1000 + 10*i),
+				Flags: link.ACK, Missing: 10}
+			tr.Packet(&pcapio.Packet{Frame: uint64(i + 2), HasTime: true, TimeNS: int64(i+2) * 1000}, &s)
+			if n := len(tr.conns[tr.lru.next.key].dirs[0].pend); n > DefaultLimits.BufferPerDir/heldOverhead+1 {
+				t.Fatalf("%d segments held", n)
+			}
+		}
+		tr.Finish()
+		if tr.Stats.Overflows == 0 {
+			t.Error("no overflow declared")
+		}
+	})
+	t.Run("a long held run drains without recursion", func(t *testing.T) {
+		r := &recorder{}
+		const n = 20_000
+		tr := NewTracker(Limits{BufferPerDir: n * (heldOverhead + 1), BufferTotal: n * (heldOverhead + 1)}, r)
+		feed(tr, pkt{cl, sv, 100, 0, link.ACK, "a"})
+		for i := n; i >= 1; i-- { // reversed: everything waits for byte 101
+			s := link.Segment{Src: netip.MustParseAddrPort(cl), Dst: netip.MustParseAddrPort(sv), Seq: uint32(101 + i),
+				Flags: link.ACK, Payload: []byte{'c'}}
+			tr.Packet(&pcapio.Packet{Frame: uint64(n - i + 2), HasTime: true, TimeNS: 1}, &s)
+		}
+		feed(tr, pkt{cl, sv, 101, 0, link.ACK, "b"})
+		tr.Finish()
+		if got := r.data["1/0"]; len(got) != n+2 || got[1] != 'b' || tr.Stats.Overflows != 0 {
+			t.Errorf("%d bytes delivered, overflows %d", len(got), tr.Stats.Overflows)
+		}
+	})
+}

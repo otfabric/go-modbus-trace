@@ -206,7 +206,7 @@ func printReport(e *env, r *mbcapexport.Report) error {
 	if e.json {
 		return writeJSON(e.stdout, r)
 	}
-	w := e.stdout
+	w := &stickyWriter{w: e.stdout}
 	_, _ = fmt.Fprintf(w, "%d transactions, %d samples written", r.TransactionsSeen, r.SamplesWritten)
 	if r.ChangeOnlyDropped > 0 {
 		_, _ = fmt.Fprintf(w, ", %d unchanged dropped", r.ChangeOnlyDropped)
@@ -214,10 +214,10 @@ func printReport(e *env, r *mbcapexport.Report) error {
 	_, _ = fmt.Fprintln(w)
 	_, _ = fmt.Fprintf(w, "excluded: %s\n", kv(r.Excluded))
 	for _, t := range r.Targets {
-		_, _ = fmt.Fprintf(w, "target %d: %s (%d samples, %d clients)\n", t.ID, t.Label, t.Samples, len(t.Streams))
+		_, _ = fmt.Fprintf(w, "target %d: %s (%s, %s)\n", t.ID, t.Label, plural(t.Samples, "sample"), plural(uint64(len(t.Streams)), "client"))
 	}
 	for _, x := range r.Warnings {
-		if x.Code == "format_draft" {
+		if x.Code == mbcapexport.WarnFormatDraft {
 			continue
 		}
 		if x.Target != 0 {
@@ -227,5 +227,5 @@ func printReport(e *env, r *mbcapexport.Report) error {
 		_, _ = fmt.Fprintf(w, "warning: %s: %s\n", x.Code, x.Text)
 	}
 	_, _ = fmt.Fprintf(w, "replay: about %d MiB in memory\n", r.Replay.EstimatedInMemoryBytes>>20)
-	return nil
+	return w.err
 }

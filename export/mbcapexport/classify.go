@@ -39,19 +39,30 @@ const (
 	ExceptionsDisabled  Reason = "exceptions_disabled"
 	NotSelected         Reason = "not_selected"
 	OutsideWindow       Reason = "outside_window"
+	InvalidTime         Reason = "invalid_time" // no response timestamp, or one before 1970
 )
 
 // Reasons lists every reason code, in report order.
 var Reasons = []Reason{RoleUnknown, Malformed, WriteFunction, FC23, UnsupportedFunction, FC08StateChanging, MEINot14,
 	Unanswered, OrphanResponse, AmbiguousPair, Uncertain, SnaplenTruncated, Resynced, InvalidPDU, ResponseMismatch,
-	ClockOrder, ExceptionsDisabled, NotSelected, OutsideWindow}
+	ClockOrder, ExceptionsDisabled, NotSelected, OutsideWindow, InvalidTime}
 
 // readFunctions are the functions a capture holds (FC08 and FC43 depend on
-// the sub-function and MEI type).
-var readFunctions = map[uint8]bool{1: true, 2: true, 3: true, 4: true, 7: true, 8: true, 11: true, 12: true, 17: true,
-	20: true, 24: true, 43: true}
-
-var writeFunctions = map[uint8]bool{5: true, 6: true, 15: true, 16: true, 21: true, 22: true}
+// the sub-function and MEI type) and writeFunctions those that change a
+// device; both come from mbtcp's function table, the one source of the
+// coverage matrix (docs/COVERAGE.md), so the two cannot disagree.
+var readFunctions, writeFunctions = func() (r, w map[uint8]bool) {
+	r, w = map[uint8]bool{}, map[uint8]bool{}
+	for _, f := range mbtcp.Coverage() {
+		switch {
+		case f.MBCAP == "yes" || f.MBCAP == "sub":
+			r[f.Code] = true
+		case f.Class == mbtcp.ClassWrite && f.Code != 23:
+			w[f.Code] = true
+		}
+	}
+	return r, w
+}()
 
 // Classify decides whether a transaction belongs in an MBCAP capture. It
 // looks at the transaction only (not at a selection, a time window or the

@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -209,6 +210,10 @@ func (q *queue) Pop() any {
 	return it
 }
 
+// ErrUnknownFormat is wrapped by the error Write returns for a Format it
+// does not know.
+var ErrUnknownFormat = errors.New("timeline: unknown format")
+
 // Columns are the CSV columns, in order.
 var Columns = []string{"kind", "seq", "time", "conn", "client", "server", "unit", "tid", "function", "sub", "class",
 	"status", "exception", "latency_ns", "flags", "warnings", "summary", "ranges",
@@ -238,7 +243,7 @@ func newWriter(w io.Writer, f Format) (*writer, error) {
 	case JSONL:
 		return tw, nil
 	default:
-		return nil, fmt.Errorf("timeline: unknown format %d", f)
+		return nil, fmt.Errorf("%w %d", ErrUnknownFormat, f)
 	}
 }
 

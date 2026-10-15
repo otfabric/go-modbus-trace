@@ -445,3 +445,35 @@ func TestNotes(t *testing.T) {
 		t.Errorf("last event %+v", e)
 	}
 }
+
+// TestPanicRecovered: a panic while handling a packet, and one while
+// flushing at the end of the trace, are recovered and counted; the pass
+// goes on and returns the summary.
+func TestPanicRecovered(t *testing.T) {
+	data, _ := build(t, tracetest.Options{}, func(b *tracetest.Builder) {
+		c := b.Conn(tracetest.ConnOptions{})
+		for i := range 3 {
+			c.Request(uint16(i), 1, rd3)
+			c.Response(uint16(i), 1, resp3(1))
+		}
+		c.Request(9, 1, rd3) // unanswered: emitted at the end of the trace
+	})
+	n := 0
+	sum, err := Analyze(context.Background(), OpenReader(bytes.NewReader(data)), Options{}, SinkFunc(func(e *model.Event) error {
+		if e.Txn != nil {
+			n++
+			panic("sink panic")
+		}
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var atEnd bool
+	for _, e := range sum.InternalErrors {
+		atEnd = atEnd || e.Frame == 0
+	}
+	if n != 4 || sum.InternalErrorCount != 4 || len(sum.InternalErrors) != 4 || !atEnd {
+		t.Errorf("%d transactions, %d internal errors %+v", n, sum.InternalErrorCount, sum.InternalErrors)
+	}
+}

@@ -128,9 +128,9 @@ func applyEnv(cmd *cobra.Command) error {
 }
 
 // args checks the number of positional arguments as a usage error.
-func args(min, max int) cobra.PositionalArgs {
+func args(lo, hi int) cobra.PositionalArgs {
 	return func(cmd *cobra.Command, a []string) error {
-		if len(a) < min || (max >= 0 && len(a) > max) {
+		if len(a) < lo || (hi >= 0 && len(a) > hi) {
 			return usageErr("%s: %s", cmd.Name(), cmd.Use)
 		}
 		return nil
@@ -159,4 +159,28 @@ func versionCommand(e *env) *cobra.Command {
 			return err
 		},
 	}
+}
+
+// stickyWriter keeps the first write error, so a report printed line by
+// line still fails the command on a closed pipe or a full disk.
+type stickyWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (s *stickyWriter) Write(b []byte) (int, error) {
+	if s.err != nil {
+		return 0, s.err
+	}
+	n, err := s.w.Write(b)
+	s.err = err
+	return n, err
+}
+
+// plural writes n with its noun: "1 client", "2 clients".
+func plural(n uint64, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }

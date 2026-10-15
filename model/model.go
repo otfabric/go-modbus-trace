@@ -92,11 +92,11 @@ type Transaction struct {
 	Ranges    []mbtcp.Range  `json:"ranges,omitempty"`
 	Request   *ADU           `json:"request,omitempty"`
 	Response  *ADU           `json:"response,omitempty"`
-	Status    string         `json:"status"`
-	Exception uint8          `json:"exception,omitempty"`
+	Status    string         `json:"status"`               // one of the Status constants
+	Exception uint8          `json:"exception,omitempty"`  // exception code of an exception response
 	LatencyNS int64          `json:"latency_ns,omitempty"` // request last byte to response first byte
 	Flags     []string       `json:"flags,omitempty"`
-	Warnings  []string       `json:"warnings,omitempty"`
+	Warnings  []string       `json:"warnings,omitempty"` // validation warnings (mbtcp.Warn* codes)
 	Summary   string         `json:"summary"`
 }
 
@@ -146,9 +146,9 @@ const (
 // Gap is a hole in a direction's byte stream.
 type Gap struct {
 	Conn   uint32 `json:"conn"`
-	Dir    string `json:"dir"` // c2s, s2c
-	Pos    uint64 `json:"pos"` // stream position
-	Bytes  int64  `json:"bytes"`
+	Dir    string `json:"dir"`    // c2s, s2c
+	Pos    uint64 `json:"pos"`    // stream position
+	Bytes  int64  `json:"bytes"`  // bytes not delivered (lost, cut or skipped)
 	Reason string `json:"reason"` // loss, snaplen, reassembly_overflow, reassembly_budget, resync_failed, incomplete
 }
 
@@ -157,7 +157,7 @@ type Resync struct {
 	Conn       uint32 `json:"conn"`
 	Dir        string `json:"dir"`
 	Pos        uint64 `json:"pos"`
-	Skipped    int    `json:"skipped"`
+	Skipped    int    `json:"skipped"`    // bytes skipped to find the next header
 	Confidence string `json:"confidence"` // next_header, run_end
 }
 
@@ -165,7 +165,7 @@ type Resync struct {
 type Note struct {
 	Code  string  `json:"code"` // capture_drops, snaplen, unsupported, damaged_file, internal_error
 	Iface *uint32 `json:"interface,omitempty"`
-	Count uint64  `json:"count,omitempty"`
+	Count uint64  `json:"count,omitempty"` // how many (for internal_error: the frame number)
 	Text  string  `json:"text"`
 }
 
@@ -181,12 +181,13 @@ const (
 
 // Event is one event; exactly one payload is set.
 type Event struct {
-	Kind   string       `json:"kind"`
-	Seq    uint64       `json:"seq"`
-	Time   *time.Time   `json:"time,omitempty"`
-	Conn   *Connection  `json:"conn,omitempty"`
-	Txn    *Transaction `json:"txn,omitempty"`
-	Gap    *Gap         `json:"gap,omitempty"`
-	Resync *Resync      `json:"resync,omitempty"`
-	Note   *Note        `json:"note,omitempty"`
+	SchemaVersion int          `json:"schema_version"` // SchemaVersion, set by the library
+	Kind          string       `json:"kind"`
+	Seq           uint64       `json:"seq"` // 1, 2, 3, ... in order of emission
+	Time          *time.Time   `json:"time,omitempty"`
+	Conn          *Connection  `json:"conn,omitempty"`
+	Txn           *Transaction `json:"txn,omitempty"`
+	Gap           *Gap         `json:"gap,omitempty"`
+	Resync        *Resync      `json:"resync,omitempty"`
+	Note          *Note        `json:"note,omitempty"`
 }

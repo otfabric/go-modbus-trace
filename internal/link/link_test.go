@@ -125,7 +125,7 @@ func TestDefrag(t *testing.T) {
 		}
 	})
 	t.Run("budget", func(t *testing.T) {
-		f := NewDefrag(40)
+		f := NewDefrag(300) // one datagram of 32 bytes costs 32+fragOverhead+datagramOverhead
 		f.Add(k, 0, true, data[:32])
 		k2 := k
 		k2.ID = 2
@@ -155,3 +155,44 @@ func FuzzLinkIPTCP(f *testing.F) {
 		}
 	})
 }
+
+// TestDefragHostile: tiny fragments are charged their overhead, finished
+// datagrams leave no order entries behind, and nested fragment headers
+// are bounded like other extension headers.
+func TestDefragHostile(t *testing.T) {
+	f := NewDefrag(testFragBudget)
+	k := FragKey{Src: netip.MustParseAddr("10.0.0.1"), Dst: netip.MustParseAddr("10.0.0.2"), Proto: 6}
+	for i := range 1_000_000 {
+		k.ID = uint32(i)
+		f.Add(k, 0, true, make([]byte, 8))
+		if f.used > testFragBudget {
+			t.Fatalf("%d bytes held over a budget of %d", f.used, testFragBudget)
+		}
+	}
+	if f.Pending > testFragBudget/(8+fragOverhead+datagramOverhead) {
+		t.Errorf("%d datagrams pending", f.Pending)
+	}
+	for i := range 100_000 { // complete ones: the order list stays short
+		k.ID = uint32(2_000_000 + i)
+		if _, r := f.Add(k, 0, false, make([]byte, 8)); r != OK {
+			t.Fatalf("reason %v", r)
+		}
+	}
+	if len(f.order) > 2*len(f.m)+64 {
+		t.Errorf("%d order entries for %d datagrams", len(f.order), len(f.m))
+	}
+
+	// An IPv6 packet whose fragment headers nest: refused, not looped.
+	ip := make([]byte, 40, 40+8*20)
+	ip[0], ip[6] = 0x60, 44
+	for range 20 {
+		ip = append(ip, 44, 0, 0, 1, 0, 0, 0, 1) // more fragments, next header: another fragment header
+	}
+	ip[4], ip[5] = 0, byte(8*20)
+	var s Segment
+	if r := NewDecoder(1<<20).Decode(LinkRaw, ip, &s); r != ExtHeaders && r != FragmentHeld && r != FragmentBad {
+		t.Errorf("nested fragment headers: %v", r)
+	}
+}
+
+const testFragBudget = 1 << 20

@@ -13,6 +13,7 @@ import (
 	"net/netip"
 	"os"
 	"runtime/debug"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -21,6 +22,7 @@ import (
 	"github.com/otfabric/go-modbus-capture/capture"
 	"github.com/otfabric/go-modbus-capture/edit"
 
+	"github.com/otfabric/go-modbus-trace/mbtcp"
 	"github.com/otfabric/go-modbus-trace/model"
 	"github.com/otfabric/go-modbus-trace/selection"
 	"github.com/otfabric/go-modbus-trace/trace"
@@ -57,9 +59,15 @@ type Options struct {
 // Open returns the writer for a capture with header h.
 type Open func(h capture.Header) (capture.Writer, error)
 
-// ErrWriter reports a sample the writer or the capture checker refused. It
-// is a bug: the exporter only writes admissible samples.
-var ErrWriter = errors.New("mbcapexport: the capture library refused a sample")
+var (
+	// ErrWriter is wrapped by the error Export returns when the capture
+	// library's checker refuses the header, a target, a stream or a sample.
+	// It is a bug: the exporter only writes admissible samples. The
+	// checker's error is wrapped too.
+	ErrWriter = errors.New("mbcapexport: the capture library refused a sample")
+	// ErrOptions is wrapped by the error Export returns for invalid Options.
+	ErrOptions = errors.New("mbcapexport: invalid options")
+)
 
 type targetKey struct {
 	server netip.AddrPort
@@ -73,17 +81,20 @@ type streamKey struct {
 
 // Export analyses f and writes the admitted transactions through the
 // writer open returns, then returns the report. The samples are spooled to
-// a temporary file during the pass, so the header can carry what is known
-// only at the end (the earliest timestamp, the hashes).
+// a temporary file (in os.TempDir) during the pass, so the header can carry
+// what is known only at the end (the earliest timestamp, the hashes).
+//
+// On an error the writer is left unfinished (not closed): its output is
+// incomplete and should be discarded, as mbtracectl does.
 func Export(ctx context.Context, f *trace.File, o trace.Options, eo Options, open Open) (*Report, error) {
 	if eo.Producer == "" {
-		return nil, errors.New("mbcapexport: Options.Producer is required")
+		return nil, fmt.Errorf("%w: Producer is required", ErrOptions)
 	}
 	if eo.TickNS == 0 {
 		eo.TickNS = capture.DefaultTickNS
 	}
 	if eo.TickNS > capture.MaxTickNS {
-		return nil, fmt.Errorf("mbcapexport: tick of %d ns, want 1 to %d", eo.TickNS, capture.MaxTickNS)
+		return nil, fmt.Errorf("%w: tick of %d ns, want 1 to %d", ErrOptions, eo.TickNS, capture.MaxTickNS)
 	}
 	if eo.WarnReplayMemory == 0 {
 		eo.WarnReplayMemory = DefaultWarnReplayMemory
@@ -162,7 +173,15 @@ type exporter struct {
 	nstream uint32
 	writes  map[targetKey][]write
 	roles   map[uint32]string
+	first   *time.Time // earliest admitted sample
+	// gapsInWindow counts selected transactions touched by a gap or a
+	// resync (flag gap_adjacent or resynced).
+	gapsInWindow uint64
 }
+
+// minWall is the earliest time MBCAP represents; nanosecond times (and so
+// the trace's) end in 2262.
+var minWall = time.Unix(0, 0)
 
 func (x *exporter) event(e *model.Event) error {
 	if e.Conn != nil && e.Kind == model.KindConnOpen {
@@ -171,6 +190,9 @@ func (x *exporter) event(e *model.Event) error {
 		}
 		x.roles[e.Conn.ID] = e.Conn.RoleSource
 	}
+	if e.Conn != nil && e.Kind == model.KindConnClose {
+		delete(x.roles, e.Conn.ID) // its transactions came before: the map holds open connections only
+	}
 	t := e.Txn
 	if t == nil {
 		return nil
@@ -178,7 +200,7 @@ func (x *exporter) event(e *model.Event) error {
 	x.rep.TransactionsSeen++
 	x.noteQuality(t)
 	key := targetKey{t.Server, t.Unit}
-	if t.Status == model.StatusOK && t.Class == "write" {
+	if t.Status == model.StatusOK && t.Class == string(mbtcp.ClassWrite) {
 		x.recordWrite(key, t)
 	}
 	r := Classify(t)
@@ -190,6 +212,19 @@ func (x *exporter) event(e *model.Event) error {
 	}
 	if r == Admit && !x.sel.Match(t) {
 		r = OutsideWindow
+	}
+	if (slices.Contains(t.Flags, model.FlagGapAdjacent) || slices.Contains(t.Flags, model.FlagResynced)) && x.sel.Match(t) {
+		x.gapsInWindow++
+	}
+	var at *time.Time
+	if t.Response != nil {
+		at = t.Response.Last
+		if at == nil {
+			at = t.Response.First
+		}
+	}
+	if r == Admit && (at == nil || at.Before(minWall)) {
+		r = InvalidTime // no timestamp (pcapng simple packets), or before 1970
 	}
 	if r != Admit {
 		x.rep.Excluded[string(r)]++
@@ -217,13 +252,8 @@ func (x *exporter) event(e *model.Event) error {
 		x.streams[sk] = st
 		tg.streams = append(tg.streams, st)
 	}
-	at := t.Response.Last
-	if at == nil {
-		at = t.Response.First
-	}
-	if at == nil {
-		x.rep.Excluded[string(Malformed)]++ // no timestamp (pcapng simple packets): no sample time
-		return nil
+	if x.first == nil || at.Before(*x.first) {
+		x.first = at
 	}
 	if t.Status == model.StatusOK {
 		for _, rg := range t.Ranges {
@@ -258,6 +288,16 @@ func (x *exporter) noteQuality(t *model.Transaction) {
 		switch f {
 		case model.FlagRetransmitted:
 			x.rep.Quality.Retransmitted++
+		case model.FlagOutOfOrder:
+			x.rep.Quality.OutOfOrder++
+		case model.FlagRetried:
+			x.rep.Quality.Retried++
+		case model.FlagSlow:
+			x.rep.Quality.Slow++
+		case model.FlagMidstream:
+			x.rep.Quality.Midstream++
+		case model.FlagRoleGuessed:
+			x.rep.Quality.RoleGuessed++
 		case model.FlagResynced:
 			x.rep.Quality.Resyncs++
 		case model.FlagSnaplen:
@@ -269,12 +309,16 @@ func (x *exporter) noteQuality(t *model.Transaction) {
 // write writes the capture from the spool and completes the report.
 func (x *exporter) write(sum *trace.FileSummary, open Open) (*Report, error) {
 	rep := x.rep
+	// The earliest packet, or the start of the window; when that is not a
+	// time MBCAP can hold (a damaged or odd clock), the earliest sample.
 	wall := time.Unix(0, 0).UTC()
-	if sum.First != nil {
-		wall = *sum.First
-	}
-	if x.sel.From != nil {
+	switch {
+	case x.sel.From != nil && !x.sel.From.Before(minWall):
 		wall = *x.sel.From
+	case sum.First != nil && !sum.First.Before(minWall):
+		wall = *sum.First
+	case x.first != nil:
+		wall = *x.first
 	}
 	h := capture.Header{TickNS: x.eo.TickNS, WallStart: wall, ChangeOnly: x.eo.ChangeOnly, Exceptions: !x.eo.NoExceptions,
 		Producer: x.eo.Producer, Tags: x.tags(sum)}
@@ -297,25 +341,25 @@ func (x *exporter) write(sum *trace.FileSummary, open Open) (*Report, error) {
 	}
 	chk, err := capture.NewChecker(h)
 	if err != nil {
-		return nil, fmt.Errorf("%w: header: %v", ErrWriter, err)
+		return nil, fmt.Errorf("%w: header: %w", ErrWriter, err)
 	}
 	byID := map[uint32]*stream{}
 	tgOf := map[uint32]*target{}
 	for _, tg := range x.tlist {
 		if err := chk.Target(tg.Target); err != nil {
-			return nil, fmt.Errorf("%w: target %d: %v", ErrWriter, tg.ID, err)
+			return nil, fmt.Errorf("%w: target %d: %w", ErrWriter, tg.ID, err)
 		}
 		if err := w.WriteTarget(tg.Target); err != nil {
-			return nil, err
+			return nil, fmt.Errorf("mbcapexport: write: %w", err)
 		}
 		tg.rep = &TargetReport{ID: tg.ID, Server: tg.key.server.String(), Unit: tg.Unit, Label: tg.Label, RoleSource: tg.role,
 			ByFunction: map[string]uint64{}}
 		for _, st := range tg.streams {
 			if err := chk.Stream(st.Stream); err != nil {
-				return nil, fmt.Errorf("%w: stream %d: %v", ErrWriter, st.ID, err)
+				return nil, fmt.Errorf("%w: stream %d: %w", ErrWriter, st.ID, err)
 			}
 			if err := w.WriteStream(st.Stream); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("mbcapexport: write: %w", err)
 			}
 			st.rep = &StreamReport{ID: st.ID, Client: strings.TrimPrefix(st.Label, "client "), Samples: 0}
 			byID[st.ID] = st
@@ -328,14 +372,14 @@ func (x *exporter) write(sum *trace.FileSummary, open Open) (*Report, error) {
 		s := capture.Sample{Stream: id, At: ticks(ns), Request: req, Response: resp}
 		keep, err := chk.Admit(s)
 		if err != nil {
-			return fmt.Errorf("%w: %v", ErrWriter, err)
+			return fmt.Errorf("%w: %w", ErrWriter, err)
 		}
 		if !keep {
 			rep.ChangeOnlyDropped++
 			return nil
 		}
 		if err := w.WriteSample(s); err != nil {
-			return fmt.Errorf("%w: %v", ErrWriter, err)
+			return fmt.Errorf("mbcapexport: write: %w", err) // the checker admitted it: an I/O error
 		}
 		if s.At+capture.Ticks(time.Second/time.Duration(h.TickNS)) < lastAt {
 			disorder = true
@@ -354,10 +398,10 @@ func (x *exporter) write(sum *trace.FileSummary, open Open) (*Report, error) {
 		end.At = lastAt
 	}
 	if err := chk.End(end); err != nil {
-		return nil, fmt.Errorf("%w: end: %v", ErrWriter, err)
+		return nil, fmt.Errorf("%w: end: %w", ErrWriter, err)
 	}
 	if err := w.Close(end); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("mbcapexport: write: %w", err)
 	}
 	x.finishReport(sum, h, disorder)
 	return rep, nil

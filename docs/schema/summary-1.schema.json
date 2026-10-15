@@ -448,6 +448,10 @@
             }
           ]
         },
+        "coverage_overflow": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "devices": {
           "anyOf": [
             {
@@ -497,6 +501,7 @@
       },
       "required": [
         "coverage",
+        "coverage_overflow",
         "devices",
         "overview",
         "patterns",
@@ -603,6 +608,10 @@
               "type": "null"
             }
           ]
+        },
+        "internal_error_count": {
+          "minimum": 0,
+          "type": "integer"
         },
         "internal_errors": {
           "items": {
@@ -896,6 +905,10 @@
     "trace.ReaderCounters": {
       "additionalProperties": false,
       "properties": {
+        "bad_options": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "other_frames": {
           "minimum": 0,
           "type": "integer"
@@ -917,6 +930,7 @@
         }
       },
       "required": [
+        "bad_options",
         "other_frames",
         "simple_packets",
         "skipped_blocks",

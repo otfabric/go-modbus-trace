@@ -208,6 +208,24 @@ Here, *changed values* counts, per target, every FC01-04 register or coil whose 
 - **Throughput** after the L2 note on allocation: `Scan` 768 MB/s and `Analyze` 206 MB/s per M1 core on the 32 MiB benchmark trace (L23: 200 and 100).
 - **The `summary` JSON changed** from L2's `devices` list to the four analyzer results (`overview`, `devices`, `patterns`, `coverage`); there has been no release, so `schema_version` stays 1.
 
+## D13. v0.1.0 readiness: audit, hardening, chaos tests (2026-10-15)
+
+A requirements audit and a code-quality audit of the L0–L4 code, and new chaos and concurrency tests, found and fixed:
+
+- **Hostile-input memory and stack bounds.** Reassembly charged held segments only their bytes, so empty segments (snap-length cuts) were held for free, and a run of held segments drained recursively, one stack frame per segment: a crafted trace could exhaust memory or the stack, which `recover` cannot catch. Each held segment now costs its bytes plus 128 and draining is a loop. IP defragmentation charges 64 per fragment and 128 per datagram, keeps its eviction order in O(1) per datagram, inserts fragments sorted instead of sorting on every fragment, and counts IPv6 Fragment headers against the 8-header bound.
+- **Sub-traces lost IP fragments.** `Walk` attributed a fragment to its connection only when it completed the datagram, so `extract` dropped the earlier fragments. They are now held (within the fragment budget) and written just before the completing one. Found by the chaos test.
+- **A damaged clock failed the export.** A trace with a timestamp before 1970 made `WallStart` invalid and the export fail. Such samples are excluded as `invalid_time` (also those without a timestamp, which were counted as `malformed`), and `WallStart` falls back to the earliest exported sample. Found by the chaos test.
+- **Panics at the end of the trace** (the flush that closes connections and emits their last transactions) were not recovered; they are now, and `internal_error_count` counts all of them (the list keeps 100).
+- **Errors:** sentinels `trace.ErrNoInput`, `trace.ErrFrameRef`, `mbcapexport.ErrOptions`, `subtrace.ErrTransactionSelection`, `timeline.ErrUnknownFormat`; library errors wrapped with `%w` (two `%w` where the capture library's error is the cause); `ErrWriter` now means only a refusal by the capture checker, while a writer's own error (I/O) is reported as such. CLI reports fail on a write error (a closed pipe) instead of exiting 0.
+- **Bounded maps:** coverage keys (40,000), the exporter's roles map (pruned at connection close). A stream `File` read by two passes at once was a data race; it is atomic now.
+- **One source for admission:** `Classify` derives its read and write function sets from `mbtcp`'s function table, which also generates `docs/COVERAGE.md`.
+- **Report:** `quality` counts `retried`, `slow`, `out_of_order`, `midstream` and `role_guessed` (MBCAP-EXPORT section 3 said so); `gap_in_window` fires only for gaps that touch selected transactions inside the window (it fired for any gap in the trace); warning codes are constants.
+- **L9:** every event carries `schema_version` (the requirement asked for it; L2 had only the constant).
+- **CLI:** `flows` reads several files as one trace like the other commands; `info` describes each file on its own (by design). Late timeline events are reported on stderr also when it is not a terminal.
+- **Determinism across platforms (L21):** `testdata/plant.outputs.json` holds the SHA-256 of every output of the fixture and every target's runner checks it. The MBCAP binary in it is written uncompressed: deflate's bytes may change between Go releases, and CI tests five.
+- **Not built, by decision:** the resync rule (b) of ARCHITECTURE section 7 (match an outstanding request); the structural rules resynchronised every scenario, random script, chaos seed and fuzz input. A per-flow role override (L6): endpoint overrides cover it. The text timeline ignores `--order` (it prints in determination order).
+- **L3 versus LA3:** L3 says the same 4-tuple on two interfaces is "reported, not merged"; LA3 says duplicates must not duplicate transactions. Merging with `multiple_interfaces` set satisfies both readings that matter: the interfaces stay in the provenance and nothing is counted twice.
+
 ## Open questions for the user
 
 - **Q1. CLI name.** Keep `mbtracectl`? **Answered 2026-10-15: yes, `mbtracectl`.**

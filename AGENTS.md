@@ -81,7 +81,7 @@ testdata/           small traces + golden event files (README.md lists origins)
 
 ## Open questions
 
-None blocking. L0 settled gopacket versus own code (own) and IPv6 fragments (kept), see `docs/DECISIONS.md`. Answered by the user on 2026-10-15: CLI name `mbtracectl`, armv7 cross-compiled only, foreign frames skipped by length, IPv6 fragments MUST, the guide provided locally. Also answered: a total reassembly budget, ACK-based gaps and the ACK-informed midstream start (Q4), and `--warn-replay-memory` with a 1 GiB default (Q6). No question is open.
+None blocking. L0 settled gopacket versus own code (own) and IPv6 fragments (kept), see `docs/DECISIONS.md`. Answered by the user on 2026-10-15: CLI name `mbtracectl`, armv7 cross-compiled only, foreign frames skipped by length, IPv6 fragments MUST, the guide provided locally. Also answered: a total reassembly budget, ACK-based gaps and the ACK-informed midstream start (Q4), and `--warn-replay-memory` with a 1 GiB default (Q6). Open: Q8–Q10 at the end of `docs/DECISIONS.md` (a real fixture, TID-reuse semantics, decoded views in the JSON Lines timeline); none blocks v0.1.0.
 
 ## Milestones (details in docs/ARCHITECTURE.md section 12)
 

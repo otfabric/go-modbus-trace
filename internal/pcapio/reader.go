@@ -28,6 +28,7 @@ const (
 	PcapNG
 )
 
+// String returns "pcap" or "pcapng".
 func (f Format) String() string {
 	switch f {
 	case Pcap:
@@ -42,10 +43,10 @@ func (f Format) String() string {
 // Errors.
 var (
 	// ErrFormat reports a stream that is neither pcap nor pcapng.
-	ErrFormat = errors.New("not a pcap or pcapng file")
+	ErrFormat = errors.New("trace: not a pcap or pcapng file")
 	// ErrCorrupt reports damage that ends the read; the packets read so
 	// far are valid.
-	ErrCorrupt = errors.New("corrupt trace file")
+	ErrCorrupt = errors.New("trace: corrupt trace file")
 )
 
 // Default bounds.
@@ -222,9 +223,6 @@ func (rd *Reader) SHA256() [32]byte {
 // InputBytes returns the number of raw input bytes consumed so far.
 func (rd *Reader) InputBytes() int64 { return rd.src.n }
 
-// Offset returns the current offset in the uncompressed stream.
-func (rd *Reader) Offset() int64 { return rd.off }
-
 func (rd *Reader) read(b []byte) error {
 	n, err := io.ReadFull(rd.r, b)
 	rd.off += int64(n)
@@ -247,7 +245,9 @@ func (rd *Reader) eof(truncated bool) error {
 	}
 	if !rd.done {
 		rd.done = true
-		_, _ = io.Copy(io.Discard, rd.src)
+		if _, err := io.Copy(io.Discard, rd.src); err != nil {
+			rd.c.TruncatedTail = true // the hash then covers only what was read
+		}
 	}
 	return io.EOF
 }
@@ -472,8 +472,8 @@ func (rd *Reader) epb(typ uint32, start int64, body []byte, p *Packet) bool {
 		id = rd.bo.Uint32(body)
 	}
 	capLen := rd.bo.Uint32(body[12:])
-	g := rd.secBase + int(id)
-	if g >= len(rd.ifaces) || capLen > uint32(rd.opts.MaxPacket) || int(capLen) > len(body)-20 {
+	g := rd.secBase + int(id) // id < len: int(id) stays positive on 32-bit platforms
+	if id >= uint32(len(rd.ifaces)) || g >= len(rd.ifaces) || capLen > uint32(rd.opts.MaxPacket) || int(capLen) > len(body)-20 {
 		rd.c.SkippedBlocks++
 		return false
 	}
@@ -515,8 +515,9 @@ func (rd *Reader) isb(body []byte) {
 		rd.c.SkippedBlocks++
 		return
 	}
-	g := rd.secBase + int(rd.bo.Uint32(body))
-	if g >= len(rd.ifaces) {
+	id := rd.bo.Uint32(body)
+	g := rd.secBase + int(id)
+	if id >= uint32(len(rd.ifaces)) || g >= len(rd.ifaces) {
 		rd.c.SkippedBlocks++
 		return
 	}
