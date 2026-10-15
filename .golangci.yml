@@ -1,0 +1,88 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - errcheck       # unchecked errors
+    - govet          # go vet checks (shadow, printf, etc.)
+    - ineffassign    # assigned but never used
+    - staticcheck    # comprehensive static analysis (includes gosimple + unused)
+    - misspell       # common spelling mistakes
+    - godot          # comment punctuation
+    - nilerr         # return nil instead of err
+    - exhaustive     # exhaustive switch on enums
+    - depguard       # offline, pure Go, minimal dependencies (AGENTS.md, L19, L20)
+    - forbidigo      # no sockets, no wall clock in the pipeline (AGENTS.md, L21)
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true  # a default: case satisfies exhaustiveness
+    depguard:
+      rules:
+        # The library reads trace files. It never opens a socket, runs a
+        # program, captures live or talks Modbus, and it is pure Go.
+        offline:
+          files:
+            - $all
+            - "!$test"
+          deny:
+            - pkg: net/http
+              desc: "offline only: no HTTP (L20)"
+            - pkg: net/rpc
+              desc: "offline only (L20)"
+            - pkg: os/exec
+              desc: "the library runs no programs (AGENTS.md); tests may"
+            - pkg: plugin
+              desc: "pure Go, CGO_ENABLED=0 (L19)"
+            - pkg: golang.org/x/sys/unix
+              desc: "no raw sockets or live capture (AGENTS.md)"
+            - pkg: golang.org/x/net/bpf
+              desc: "no live capture (AGENTS.md)"
+            - pkg: github.com/gopacket/gopacket
+              desc: "not a dependency: own reader and reassembly (docs/DECISIONS.md D1, D2)"
+            - pkg: github.com/google/gopacket
+              desc: "not a dependency (docs/DECISIONS.md D1)"
+            - pkg: github.com/otfabric/go-modbus
+              desc: "go-modbus is a test-only dependency (ARCHITECTURE.md section 3)"
+            - pkg: math/rand
+              desc: "reproducible output: no randomness outside tests (L21)"
+            - pkg: database/sql
+              desc: "no database: indexes belong to the application (AGENTS.md)"
+    forbidigo:
+      # Match on types, so that a renamed import or a method value is caught too.
+      analyze-types: true
+      forbid:
+        - pattern: ^net\.(Dial|DialTimeout|DialTCP|DialUDP|DialIP|DialUnix|Listen|ListenTCP|ListenUDP|ListenIP|ListenUnix|ListenUnixgram|ListenPacket|ListenMulticastUDP|FileConn|FileListener|FilePacketConn)$
+          pkg: ^net$
+          msg: "offline only: the library opens no sockets (L20)"
+        - pattern: ^net\.(Dialer|ListenConfig|Resolver)$
+          pkg: ^net$
+          msg: "offline only: the library opens no sockets and resolves no names (L20)"
+        - pattern: ^time\.(Now|Since|Until)$
+          pkg: ^time$
+          msg: "the only clock is the trace's timestamps; time.Now is for CLI progress only (AGENTS.md)"
+  exclusions:
+    rules:
+      # Tests may build traces with go-modbus over net.Pipe and time themselves.
+      - path: _test\.go$
+        linters:
+          - forbidigo
+      # The CLI may show progress against the wall clock.
+      - path: ^cmd/
+        text: "time\\.(Now|Since|Until)"
+        linters:
+          - forbidigo
+
+formatters:
+  enable:
+    - gofmt          # formatting
+    - goimports      # import grouping / formatting
+
+issues:
+  # Bump the default per-linter issue limit (default is 50)
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
+  # Typecheck tests too (matches go test / IDE behavior for packages with _test.go).
+  tests: true

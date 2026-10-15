@@ -1,0 +1,67 @@
+name: CI
+run-name: "CI (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ github.actor }}"
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  # Organisation checks: format, lint, vet, vulnerabilities, race tests, coverage.
+  ci:
+    uses: otfabric/.github/.github/workflows/go-ci.yml@v2
+    with:
+      codecov-name: go-modbus-trace
+      go-versions: '["1.23", "1.24", "1.25", "1.26", "1.27"]'
+    secrets: inherit
+
+  # Every target of REQUIREMENTS.md "Programs" builds and tests with
+  # CGO_ENABLED=0 on a runner of its own architecture. Nothing is emulated (no
+  # QEMU): linux/arm (v7) has no hosted runner, so it is cross-compiled on the
+  # arm64 runner and not executed (docs/DECISIONS.md). From L1 on, this job also
+  # builds cmd/mbtracectl and checks with `file` that the Linux binaries are static.
+  targets:
+    name: Target ${{ matrix.os }}/${{ matrix.arch }}${{ matrix.goarm && 'v7' || '' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: linux, arch: amd64, runner: ubuntu-24.04, test: true }
+          - { os: linux, arch: arm64, runner: ubuntu-24.04-arm, test: true }
+          - { os: linux, arch: arm, goarm: "7", runner: ubuntu-24.04-arm, test: false }
+          - { os: darwin, arch: arm64, runner: macos-latest, test: true }
+          - { os: darwin, arch: amd64, runner: macos-15-intel, test: true }
+          - { os: windows, arch: amd64, runner: windows-latest, test: true }
+          - { os: windows, arch: arm64, runner: windows-11-arm, test: true }
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    env:
+      CGO_ENABLED: "0"
+      GOOS: ${{ matrix.os }}
+      GOARCH: ${{ matrix.arch }}
+      GOARM: ${{ matrix.goarm }}
+      GOWORK: "off"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: No replace directives
+        run: make mod-check
+      - name: Build
+        run: go build ./...
+      - name: Test
+        if: matrix.test
+        run: go test -count=1 ./...
