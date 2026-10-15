@@ -41,7 +41,10 @@ linters:
               desc: "not a dependency: own reader and reassembly (docs/DECISIONS.md D1, D2)"
             - pkg: github.com/google/gopacket
               desc: "not a dependency (docs/DECISIONS.md D1)"
-            - pkg: github.com/otfabric/go-modbus
+            # "$" is an exact match: go-modbus-trace and go-modbus-capture share the prefix.
+            - pkg: github.com/otfabric/go-modbus$
+              desc: "go-modbus is a test-only dependency (ARCHITECTURE.md section 3)"
+            - pkg: github.com/otfabric/go-modbus/
               desc: "go-modbus is a test-only dependency (ARCHITECTURE.md section 3)"
             - pkg: math/rand
               desc: "reproducible output: no randomness outside tests (L21)"
