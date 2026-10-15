@@ -1,0 +1,139 @@
+// SPDX-License-Identifier: MIT
+
+// Package trace is the facade of go-modbus-trace: it opens a packet trace
+// (pcap or pcapng, plain or gzip, from a file or a stream), finds the
+// Modbus/TCP traffic in it and reports what it found.
+//
+// The library is offline: it never opens a socket and never captures live.
+// Its only clock is the trace's timestamps, and the same input gives the
+// same output.
+package trace
+
+import (
+	"errors"
+	"fmt"
+	"io"
+	"net/netip"
+	"os"
+
+	"github.com/otfabric/go-modbus-trace/internal/flow"
+	"github.com/otfabric/go-modbus-trace/internal/pcapio"
+	"github.com/otfabric/go-modbus-trace/mbtcp"
+)
+
+// Errors.
+var (
+	// ErrFormat reports an input that is neither pcap nor pcapng.
+	ErrFormat = pcapio.ErrFormat
+	// ErrCorrupt reports damage that ended the read; what was read before
+	// it is reported.
+	ErrCorrupt = pcapio.ErrCorrupt
+	// ErrConsumed reports a second pass over a stream input.
+	ErrConsumed = errors.New("trace: a stream input can be read only once")
+)
+
+// File is an opened trace: a path (any number of passes) or a stream (one).
+type File struct {
+	path   string
+	size   int64
+	stream io.Reader
+	used   bool
+}
+
+// Open opens a trace file by path. Nothing is read until a pass runs.
+func Open(path string) (*File, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if fi.IsDir() {
+		return nil, fmt.Errorf("%s: is a directory", path)
+	}
+	return &File{path: path, size: fi.Size()}, nil
+}
+
+// OpenReader wraps a stream (for example standard input). It can be read
+// by one pass only.
+func OpenReader(r io.Reader) *File { return &File{stream: r, size: -1} }
+
+// Name returns the path, or "-" for a stream.
+func (f *File) Name() string {
+	if f.stream != nil {
+		return "-"
+	}
+	return f.path
+}
+
+// Size returns the file size, or -1 for a stream.
+func (f *File) Size() int64 { return f.size }
+
+func (f *File) open() (io.ReadCloser, error) {
+	if f.stream != nil {
+		if f.used {
+			return nil, ErrConsumed
+		}
+		f.used = true
+		return io.NopCloser(f.stream), nil
+	}
+	return os.Open(f.path)
+}
+
+// Limits bound memory. Zero values take the defaults.
+type Limits struct {
+	MaxConns       int // tracked connections (100,000)
+	BufferPerDir   int // out-of-order bytes per direction (1 MiB)
+	BufferTotal    int // out-of-order bytes over all connections (64 MiB)
+	ResyncScan     int // bytes scanned for a resync (64 KiB)
+	FragmentBudget int // IP fragment bytes held (16 MiB)
+	MaxPacket      int // largest captured packet read (256 KiB)
+}
+
+// DefaultLimits are the documented defaults.
+var DefaultLimits = Limits{
+	MaxConns:       flow.DefaultLimits.MaxConns,
+	BufferPerDir:   flow.DefaultLimits.BufferPerDir,
+	BufferTotal:    flow.DefaultLimits.BufferTotal,
+	ResyncScan:     mbtcp.DefaultResyncLimit,
+	FragmentBudget: 16 << 20,
+	MaxPacket:      pcapio.DefaultMaxPacket,
+}
+
+func (l Limits) withDefaults() Limits {
+	d := DefaultLimits
+	if l.MaxConns <= 0 {
+		l.MaxConns = d.MaxConns
+	}
+	if l.BufferPerDir <= 0 {
+		l.BufferPerDir = d.BufferPerDir
+	}
+	if l.BufferTotal <= 0 {
+		l.BufferTotal = d.BufferTotal
+	}
+	if l.ResyncScan <= 0 {
+		l.ResyncScan = d.ResyncScan
+	}
+	if l.FragmentBudget <= 0 {
+		l.FragmentBudget = d.FragmentBudget
+	}
+	if l.MaxPacket <= 0 {
+		l.MaxPacket = d.MaxPacket
+	}
+	return l
+}
+
+// DefaultServerPorts are the ports taken as Modbus servers by default.
+var DefaultServerPorts = []uint16{502}
+
+// ScanOptions configure Scan.
+type ScanOptions struct {
+	// ServerPorts are server ports for the role decision (default 502).
+	ServerPorts []uint16
+	// Servers and Clients override the role decision; a zero port matches
+	// any port.
+	Servers []netip.AddrPort
+	Clients []netip.AddrPort
+	Limits  Limits
+	// Progress, if set, is called about every 4 MiB of input with the input
+	// bytes read and the total (-1 for a stream).
+	Progress func(read, total int64)
+}
