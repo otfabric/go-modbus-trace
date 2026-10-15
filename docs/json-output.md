@@ -89,7 +89,8 @@ The meaning of every counter is in `ARCHITECTURE.md` sections 4 to 7 and 11.
                "overflow": 0},
   "coverage": [{"server": "10.0.0.2:502", "unit": 1, "space": "holding",
                 "read": [{"start": 0, "end": 9, "count": 60, "first": "...", "last": "..."}],
-                "written": [{"start": 5, "end": 5, "count": 1, "first": "...", "last": "..."}], "overflow": 0}]
+                "written": [{"start": 5, "end": 5, "count": 1, "first": "...", "last": "..."}], "overflow": 0}],
+  "coverage_overflow": 0
 }
 ```
 
@@ -99,7 +100,7 @@ sees only selected transactions. `devices` are the server endpoints and units, o
 A pattern is one (client, server, unit, request PDU); `jitter_ns` is the median absolute deviation of its
 intervals and `volatility` the share of responses that differ from the one before. Coverage ranges are
 inclusive and merged when adjacent. Each analyzer has a cap (10,000 devices, 256 clients per device, 10,000
-patterns, 4,096 ranges per server, unit and space) and counts what it left out in `overflow`.
+patterns, 40,000 server/unit/space keys with 4,096 ranges each) and counts what it left out in `overflow` (`coverage_overflow` for the coverage keys).
 
 ## `export mbcap`
 
@@ -115,7 +116,7 @@ Its fields and warning codes are in [MBCAP-EXPORT.md](MBCAP-EXPORT.md) section 5
 
 ## `timeline --format jsonl`, `export timeline` to `.jsonl`
 
-One event per line, exactly as `trace.Analyze` produces it: the JSON Schema is
+One event per line, exactly as `trace.Analyze` produces it, each with `schema_version`: the JSON Schema is
 [`schema/event-1.schema.json`](schema/event-1.schema.json). `--json` on `timeline` selects this format.
 The CSV form has one row per event with the columns of `timeline.Columns`: `kind`, `seq`, `time`, `conn`,
 `client`, `server`, `unit`, `tid`, `function`, `sub`, `class`, `status`, `exception`, `latency_ns`, `flags`

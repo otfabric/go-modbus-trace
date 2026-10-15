@@ -34,8 +34,11 @@ type FileSummary struct {
 	Quality     Quality           `json:"quality"`
 	// TimeBackwards counts packets stamped earlier than the packet before
 	// them (merged captures, clock steps). The pipeline never sorts.
-	TimeBackwards  uint64          `json:"time_backwards"`
-	InternalErrors []InternalError `json:"internal_errors,omitempty"`
+	TimeBackwards uint64 `json:"time_backwards"`
+	// InternalErrors are recovered panics, the first 100 of
+	// InternalErrorCount; a non-zero count is a bug worth reporting.
+	InternalErrors     []InternalError `json:"internal_errors,omitempty"`
+	InternalErrorCount uint64          `json:"internal_error_count,omitempty"`
 	// Error is set when the read ended early on a damaged file.
 	Error string `json:"error,omitempty"`
 	// Transactions and TransactionFlags count the transactions by status
@@ -56,13 +59,13 @@ type Input struct {
 
 // Interface is a capture interface.
 type Interface struct {
-	ID          int     `json:"id"`   // within its input
-	Part        int     `json:"part"` // index of the input file
-	Section     int     `json:"section"`
+	ID          int     `json:"id"`      // within its input
+	Part        int     `json:"part"`    // index of the input file
+	Section     int     `json:"section"` // pcapng section index within its input
 	LinkType    uint16  `json:"link_type"`
 	Link        string  `json:"link"`
 	SnapLen     uint32  `json:"snaplen"`
-	TSResol     byte    `json:"tsresol"`
+	TSResol     byte    `json:"tsresol"` // pcapng if_tsresol: decimal digits, or 0x80|n for 2^-n
 	Name        string  `json:"name,omitempty"`
 	Description string  `json:"description,omitempty"`
 	Packets     uint64  `json:"packets"`
@@ -97,41 +100,43 @@ type ReaderCounters struct {
 	SimplePackets uint64 `json:"simple_packets"` // no timestamp: used for flow state, never for timing
 	SkippedBlocks uint64 `json:"skipped_blocks"` // damaged pcapng blocks with a plausible length
 	UnknownBlocks uint64 `json:"unknown_blocks"`
+	BadOptions    uint64 `json:"bad_options"`  // pcapng option areas that did not parse (ignored), or an invalid if_tsresol
 	OtherFrames   uint64 `json:"other_frames"` // custom and journal blocks Wireshark numbers as frames
 	TruncatedTail bool   `json:"truncated_tail"`
 }
 
 // ConnCounters report connection tracking.
 type ConnCounters struct {
-	Total      uint64 `json:"total"` // connection epochs
-	Midstream  uint64 `json:"midstream"`
-	Evicted    uint64 `json:"evicted"`
-	Superseded uint64 `json:"superseded"`
-	MaxTracked int    `json:"max_tracked"`
-	AfterClose uint64 `json:"packets_after_close"`
+	Total      uint64 `json:"total"`               // connection epochs
+	Midstream  uint64 `json:"midstream"`           // without a captured handshake
+	Evicted    uint64 `json:"evicted"`             // dropped from a full table (Limits.MaxConns), least recently seen first
+	Superseded uint64 `json:"superseded"`          // ended by a new epoch of the same 4-tuple
+	MaxTracked int    `json:"max_tracked"`         // most connections tracked at once
+	AfterClose uint64 `json:"packets_after_close"` // packets of a connection after its FIN or RST (final ACKs)
 }
 
 // Quality counts TCP and framing conditions over the trace.
 type Quality struct {
-	Retransmitted      uint64 `json:"retransmitted"`
-	OutOfOrder         uint64 `json:"out_of_order"`
-	OverlapConflicts   uint64 `json:"overlap_conflict"`
-	Keepalives         uint64 `json:"keepalives"`
-	SYNRetransmits     uint64 `json:"syn_retransmits"`
-	Gaps               uint64 `json:"gaps"`
-	GapBytes           uint64 `json:"gap_bytes"`
-	ReassemblyOverflow uint64 `json:"reassembly_overflow"`
-	ReassemblyBudget   uint64 `json:"reassembly_budget"`
-	Resyncs            uint64 `json:"resyncs"`
-	ResyncFailed       uint64 `json:"resync_failed"`
-	JunkBytes          uint64 `json:"junk_bytes"` // bytes of TCP payload that framed as nothing
+	Retransmitted      uint64 `json:"retransmitted"`       // segments already delivered, seen again
+	OutOfOrder         uint64 `json:"out_of_order"`        // segments held until the bytes before them came
+	OverlapConflicts   uint64 `json:"overlap_conflict"`    // retransmissions whose bytes differ (the first data wins)
+	Keepalives         uint64 `json:"keepalives"`          // one-byte probes before the next expected byte
+	SYNRetransmits     uint64 `json:"syn_retransmits"`     // repeated SYNs of one epoch
+	Gaps               uint64 `json:"gaps"`                // holes in a direction's byte stream, of any cause
+	GapBytes           uint64 `json:"gap_bytes"`           // bytes in those holes, where the sequence numbers tell
+	ReassemblyOverflow uint64 `json:"reassembly_overflow"` // gaps declared by Limits.BufferPerDir
+	ReassemblyBudget   uint64 `json:"reassembly_budget"`   // gaps declared by Limits.BufferTotal
+	Resyncs            uint64 `json:"resyncs"`             // framing resynchronisations
+	ResyncFailed       uint64 `json:"resync_failed"`       // resyncs that found no header within Limits.ResyncScan
+	JunkBytes          uint64 `json:"junk_bytes"`          // bytes of TCP payload that framed as nothing
 	ForeignFrames      uint64 `json:"foreign_protocol"`
 	SnaplenTruncated   uint64 `json:"snaplen_truncated"` // ADUs cut by the snap length
 }
 
-// InternalError is a recovered panic while decoding one packet.
+// InternalError is a recovered panic while decoding one packet (Frame 0:
+// while flushing at the end of the trace).
 type InternalError struct {
-	Frame   uint64 `json:"frame"`
+	Frame   uint64 `json:"frame"` // within the input being read when it happened
 	Message string `json:"message"`
 }
 
@@ -149,7 +154,7 @@ type Flow struct {
 	Close      string         `json:"close"` // fin, rst, end_of_trace, evicted, superseded
 	First      *time.Time     `json:"first,omitempty"`
 	Last       *time.Time     `json:"last,omitempty"`
-	Iface      uint32         `json:"interface"`
+	Iface      uint32         `json:"interface"` // the interface of its first packet
 	MultiIface bool           `json:"multiple_interfaces"`
 	Packets    [2]uint64      `json:"packets"` // A to B, B to A
 	Bytes      [2]uint64      `json:"bytes"`   // TCP payload bytes
@@ -159,9 +164,9 @@ type Flow struct {
 	// the better direction (0..1).
 	Score       float64   `json:"score"`
 	ADUs        [2]uint64 `json:"adus"`
-	MaxRun      [2]uint64 `json:"max_run"` // longest run of consecutive valid ADUs
-	Foreign     uint64    `json:"foreign_protocol"`
-	Resyncs     uint64    `json:"resyncs"`
+	MaxRun      [2]uint64 `json:"max_run"`          // longest run of consecutive valid ADUs
+	Foreign     uint64    `json:"foreign_protocol"` // frames with a non-zero MBAP protocol ID, skipped by length
+	Resyncs     uint64    `json:"resyncs"`          // framing resynchronisations, both directions
 	JunkBytes   uint64    `json:"junk_bytes"`
 	ServerPort  uint16    `json:"server_port,omitempty"` // B's port when the role is known
 	Gaps        uint64    `json:"gaps"`

@@ -151,6 +151,19 @@ jobs:
             echo "| $b | ${x:--} | $y | $d |" >> "$GITHUB_STEP_SUMMARY"
           done
 
+  # LA14: 2 GiB of generated trace streamed through Scan and Analyze; the
+  # live heap must stay flat (make soak; 5 GiB by hand).
+  soak:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: make soak SOAK_GIB=2
+
   # A time-boxed run of every fuzz target on pull requests (TESTING.md
   # section 3); the seed corpora run in every test job.
   fuzz:

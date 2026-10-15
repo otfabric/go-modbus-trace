@@ -11,7 +11,7 @@ import (
 )
 
 // ErrNotSeekable reports random access to a compressed file.
-var ErrNotSeekable = errors.New("random access needs an uncompressed file")
+var ErrNotSeekable = errors.New("trace: random access needs an uncompressed trace file")
 
 // Index is what random access needs to re-read one record: the byte order
 // and interfaces of every section. Build it once per file.
@@ -35,7 +35,7 @@ type sectionAt struct {
 func NewIndex(r io.ReaderAt, size int64) (*Index, error) {
 	var h [24]byte
 	if _, err := r.ReadAt(h[:4], 0); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrFormat, err)
+		return nil, fmt.Errorf("%w: %w", ErrFormat, err)
 	}
 	if h[0] == 0x1f && h[1] == 0x8b {
 		return nil, ErrNotSeekable
@@ -106,7 +106,9 @@ func NewIndex(r io.ReaderAt, size int64) (*Index, error) {
 }
 
 // ReadAt reads the packet record or block that starts at off. The
-// returned packet has no frame number; Data is newly allocated.
+// returned packet has no frame number; Data is newly allocated. A packet
+// may be as large as a block (DefaultMaxBlock): the pass that found the
+// offset already applied its own MaxPacket.
 func (ix *Index) ReadAt(r io.ReaderAt, off int64) (Packet, error) {
 	if ix.format == Pcap {
 		var h [16]byte
@@ -114,7 +116,7 @@ func (ix *Index) ReadAt(r io.ReaderAt, off int64) (Packet, error) {
 			return Packet{}, err
 		}
 		capLen := ix.bo.Uint32(h[8:])
-		if capLen > DefaultMaxPacket {
+		if capLen > DefaultMaxBlock {
 			return Packet{}, fmt.Errorf("%w: record at offset %d", ErrCorrupt, off)
 		}
 		data := make([]byte, capLen)
@@ -122,6 +124,9 @@ func (ix *Index) ReadAt(r io.ReaderAt, off int64) (Packet, error) {
 			return Packet{}, err
 		}
 		sub := int64(ix.bo.Uint32(h[4:]))
+		if (ix.nanos && sub >= 1e9) || (!ix.nanos && sub >= 1e6) {
+			return Packet{}, fmt.Errorf("%w: record at offset %d has a sub-second part of %d", ErrCorrupt, off, sub)
+		}
 		if !ix.nanos {
 			sub *= 1000
 		}
@@ -147,7 +152,7 @@ func (ix *Index) ReadAt(r io.ReaderAt, off int64) (Packet, error) {
 	}
 	// A copy of the interfaces: the reader counts packets in them, and
 	// ReadAt must be safe for concurrent use.
-	rd := &Reader{bo: sec.bo, ifaces: append([]Interface(nil), ix.ifaces...), secBase: sec.base, opts: Options{MaxPacket: DefaultMaxPacket}}
+	rd := &Reader{bo: sec.bo, ifaces: append([]Interface(nil), ix.ifaces...), secBase: sec.base, opts: Options{MaxPacket: DefaultMaxBlock}}
 	var p Packet
 	ok := false
 	switch typ {

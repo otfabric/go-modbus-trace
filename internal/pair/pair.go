@@ -57,9 +57,6 @@ func New(o Options, c Conn, emit func(*model.Transaction)) *Pairer {
 	return &Pairer{o: o, c: c, emit: emit}
 }
 
-// Outstanding returns the number of unanswered requests held.
-func (p *Pairer) Outstanding() int { return len(p.out) }
-
 // Request takes a request ADU.
 func (p *Pairer) Request(a ADU) {
 	q := &pending{ADU: a}

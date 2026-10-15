@@ -177,6 +177,9 @@ type summaryJSON struct {
 	Devices       *analyze.DevicesResult   `json:"devices"`
 	Patterns      *analyze.PatternsResult  `json:"patterns"`
 	Coverage      []analyze.CoverageResult `json:"coverage"`
+	// CoverageOverflow counts ranges of server, unit and space keys beyond
+	// analyze.MaxCoverageSpaces.
+	CoverageOverflow uint64 `json:"coverage_overflow"`
 }
 
 func summaryCommand(e *env) *cobra.Command {
@@ -219,7 +222,7 @@ func summaryCommand(e *env) *cobra.Command {
 				return aerr
 			}
 			out := summaryJSON{SchemaVersion: schemaVersion, Selection: sel.String(), Summary: sum, Overview: ov.Result(),
-				Devices: dev.Result(), Patterns: pat.Result(), Coverage: cov.Result()}
+				Devices: dev.Result(), Patterns: pat.Result(), Coverage: cov.Result(), CoverageOverflow: cov.Overflow()}
 			if e.json {
 				err = writeJSON(e.stdout, out)
 			} else {
@@ -239,7 +242,8 @@ func summaryCommand(e *env) *cobra.Command {
 
 func dur(ns int64) string { return time.Duration(ns).Round(time.Microsecond).String() }
 
-func printSummary(w io.Writer, s *summaryJSON, top int) error {
+func printSummary(out io.Writer, s *summaryJSON, top int) error {
+	w := &stickyWriter{w: out}
 	f := s.Summary
 	_, _ = fmt.Fprintf(w, "%s: %d packets, %s to %s\n", f.File, f.Packets, ts(f.First), ts(f.Last))
 	_, _ = fmt.Fprintf(w, "transactions: %s\n", kv(s.Overview.ByStatus))
@@ -284,7 +288,7 @@ func printSummary(w io.Writer, s *summaryJSON, top int) error {
 			_, _ = fmt.Fprintln(w)
 		}
 	}
-	return nil
+	return w.err
 }
 
 func ranges(ivs []analyze.Interval) string {
@@ -365,7 +369,7 @@ func runTimeline(cmd *cobra.Command, e *env, af *analyzeFlags, sf *selFlags, ins
 		return usageErr("--format %q: text, csv or jsonl", format)
 	}
 	_, st, err := timeline.Write(cmd.Context(), f, o, w, to)
-	if err == nil && st.Late > 0 && e.progress {
+	if err == nil && st.Late > 0 { // a warning, on stderr whether or not it is a terminal
 		_, _ = fmt.Fprintf(e.stderr, "%d events came later than the reorder window and were written out of order\n", st.Late)
 	}
 	return err

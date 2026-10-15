@@ -14,16 +14,20 @@ import (
 
 // ErrNotSeekable reports random access to a gzip file or a stream: an
 // application that needs it decompresses the trace to a file first.
-var ErrNotSeekable = errors.New("trace: random access needs an uncompressed trace file")
+var ErrNotSeekable = pcapio.ErrNotSeekable
+
+// ErrFrameRef is wrapped by the error Frames returns for a reference to an
+// input file this File does not have (a reference from another trace).
+var ErrFrameRef = errors.New("trace: frame reference to a file not in this trace")
 
 // Frame is one packet read back by reference.
 type Frame struct {
-	Ref      model.FrameRef
-	LinkType uint16
-	TimeNS   int64
-	OrigLen  uint32
-	Data     []byte // the captured packet
-	Payload  []byte // the ADU bytes this packet carried; nil after IP reassembly
+	Ref      model.FrameRef // the reference it was read by
+	LinkType uint16         // LINKTYPE_ value of its interface
+	TimeNS   int64          // packet time, nanoseconds since 1970
+	OrigLen  uint32         // length on the wire; more than len(Data) when the snap length cut it
+	Data     []byte         // the captured packet
+	Payload  []byte         // the ADU bytes this packet carried; nil after IP reassembly
 }
 
 type frameIndex struct {
@@ -44,7 +48,7 @@ func (f *File) Frames(refs []model.FrameRef) ([]Frame, error) {
 	out := make([]Frame, 0, len(refs))
 	for _, r := range refs {
 		if int(r.Part) >= len(f.parts) {
-			return out, fmt.Errorf("frame %d: no input file %d", r.Frame, r.Part)
+			return out, fmt.Errorf("%w: frame %d of input %d", ErrFrameRef, r.Frame, r.Part)
 		}
 		fr, err := f.parts[r.Part].frame(r)
 		if err != nil {

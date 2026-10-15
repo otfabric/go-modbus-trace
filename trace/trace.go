@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"os"
 	"strings"
+	"sync/atomic"
 
 	"github.com/otfabric/go-modbus-trace/internal/flow"
 	"github.com/otfabric/go-modbus-trace/internal/pcapio"
@@ -31,6 +32,8 @@ var (
 	ErrCorrupt = pcapio.ErrCorrupt
 	// ErrConsumed reports a second pass over a stream input.
 	ErrConsumed = errors.New("trace: a stream input can be read only once")
+	// ErrNoInput is returned by OpenFiles without a path.
+	ErrNoInput = errors.New("trace: no input")
 )
 
 // File is an opened trace: one or more paths (any number of passes), or a
@@ -45,8 +48,8 @@ type part struct {
 	path   string
 	size   int64
 	stream io.Reader
-	used   bool
-	index  frameIndex // for Frames
+	used   atomic.Bool // a stream was handed to a pass
+	index  frameIndex  // for Frames
 }
 
 // Open opens a trace file by path. Nothing is read until a pass runs.
@@ -55,7 +58,7 @@ func Open(path string) (*File, error) { return OpenFiles(path) }
 // OpenFiles opens several trace files that are one trace, in time order.
 func OpenFiles(paths ...string) (*File, error) {
 	if len(paths) == 0 {
-		return nil, errors.New("trace: no input")
+		return nil, ErrNoInput
 	}
 	f := &File{}
 	for _, path := range paths {
@@ -64,7 +67,7 @@ func OpenFiles(paths ...string) (*File, error) {
 			return nil, err
 		}
 		if fi.IsDir() {
-			return nil, fmt.Errorf("%s: is a directory", path)
+			return nil, fmt.Errorf("trace: %s: is a directory", path)
 		}
 		f.parts = append(f.parts, &part{path: path, size: fi.Size()})
 	}
@@ -115,10 +118,9 @@ func (p *part) name() string {
 
 func (p *part) open() (io.ReadCloser, error) {
 	if p.stream != nil {
-		if p.used {
+		if !p.used.CompareAndSwap(false, true) {
 			return nil, ErrConsumed
 		}
-		p.used = true
 		return io.NopCloser(p.stream), nil
 	}
 	return os.Open(p.path)
@@ -178,7 +180,8 @@ type ScanOptions struct {
 	// any port.
 	Servers []netip.AddrPort
 	Clients []netip.AddrPort
-	Limits  Limits
+	// Limits bound memory; zero fields take DefaultLimits.
+	Limits Limits
 	// Progress, if set, is called about every 4 MiB of input with the input
 	// bytes read and the total (-1 for a stream).
 	Progress func(read, total int64)

@@ -29,7 +29,13 @@ type gen struct {
 }
 
 // Generate returns the schema of v's type, indented, with a final newline.
-func Generate(id, title, description string, v any) ([]byte, error) {
+// A type it cannot map (a channel, a function) is an error.
+func Generate(id, title, description string, v any) (_ []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("%v", r)
+		}
+	}()
 	g := &gen{defs: map[string]any{}}
 	root := g.schema(reflect.TypeOf(v), false)
 	s := map[string]any{"$schema": "https://json-schema.org/draft/2020-12/schema", "$id": id, "title": title, "description": description}

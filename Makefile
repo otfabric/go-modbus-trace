@@ -66,10 +66,11 @@ fuzz: ## Run every fuzz target for FUZZ_TIME
 soak: ## Stream SOAK_GIB GiB of generated trace through Scan and check that memory stays flat
 	@MBTRACE_SOAK=$(SOAK_GIB) go test -count=1 -run TestSoak -v -timeout 60m ./trace
 
-golden: ## Regenerate docs/COVERAGE.md, the generated JSON Schemas and testdata/plant.pcapng
+golden: ## Regenerate docs/COVERAGE.md, the JSON Schemas, testdata/plant.pcapng and its output hashes
 	@MBTRACE_UPDATE=1 go test -count=1 -run TestCoverageDoc ./mbtcp
 	@MBTRACE_UPDATE=1 go test -count=1 -run TestSchemasUpToDate ./cmd/mbtracectl
 	@MBTRACE_UPDATE=1 go test -count=1 -run TestFixture ./trace
+	@MBTRACE_UPDATE=1 go test -count=1 -run TestGoldenOutputs ./cmd/mbtracectl
 
 tools: ## Install the pinned mbcapctl and modbusctl into GOBIN
 	@go install github.com/otfabric/go-modbus-capture/cmd/mbcapctl@$(MBCAPCTL_VERSION)

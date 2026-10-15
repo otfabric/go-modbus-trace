@@ -8,6 +8,7 @@ import (
 
 	"github.com/otfabric/go-modbus-capture/capture"
 
+	"github.com/otfabric/go-modbus-trace/mbtcp"
 	"github.com/otfabric/go-modbus-trace/trace"
 )
 
@@ -20,9 +21,9 @@ const ReportSchemaVersion = 1
 // Excluded holds exactly.
 type Report struct {
 	SchemaVersion     int               `json:"schema_version"`
-	Library           string            `json:"library"`
-	CaptureLibrary    string            `json:"capture_library"`
-	Format            string            `json:"format"`
+	Library           string            `json:"library"`         // "go-modbus-trace <version>"
+	CaptureLibrary    string            `json:"capture_library"` // "go-modbus-capture <version>"
+	Format            string            `json:"format"`          // "MBCAP draft <major>.<minor>"
 	Inputs            []ReportInput     `json:"inputs"`
 	Selection         string            `json:"selection"`
 	TickNS            uint64            `json:"tick_ns"`
@@ -69,18 +70,38 @@ type StreamReport struct {
 	Samples uint64 `json:"samples"`
 }
 
-// ReportQuality counts conditions of the trace that a user weighs.
+// ReportQuality counts conditions of the trace that a user weighs. The
+// flag counts are of transactions with the flag, exported or not; none of
+// these flags excludes a transaction by itself.
 type ReportQuality struct {
-	Retransmitted    uint64 `json:"retransmitted"` // transactions with the flag
+	Retransmitted    uint64 `json:"retransmitted"`
+	OutOfOrder       uint64 `json:"out_of_order"`
+	Retried          uint64 `json:"retried"`
+	Slow             uint64 `json:"slow"`
+	Midstream        uint64 `json:"midstream"`
+	RoleGuessed      uint64 `json:"role_guessed"`
 	Gaps             uint64 `json:"gaps"`
 	Resyncs          uint64 `json:"resyncs"`
 	SnaplenTruncated uint64 `json:"snaplen_truncated"`
 	CaptureDrops     uint64 `json:"capture_drops"`
 }
 
+// Warning codes (stable, MBCAP-EXPORT.md section 5).
+const (
+	WarnFormatDraft     = "format_draft"         // MBCAP is a draft: readers of version 1.0 will not read the file
+	WarnCaptureDrops    = "capture_drops"        // the capture host dropped packets
+	WarnGapInWindow     = "gap_in_window"        // transactions in the exported window were lost to gaps or resyncs
+	WarnTimeDisorder    = "time_disorder"        // samples are more than a second out of time order
+	WarnUnitCollision   = "unit_collision"       // two targets use the same unit ID
+	WarnRoleGuessed     = "role_guessed"         // a target's server role came from the traffic's structure only
+	WarnSingleSample    = "single_sample_target" // a target was read once
+	WarnStaleAfterWrite = "stale_after_write"    // a write came after the last read of a range
+	WarnReplayMemory    = "replay_memory"        // the replay estimate exceeds Options.WarnReplayMemory
+)
+
 // Warning is one finding about the replay of this capture.
 type Warning struct {
-	Code         string     `json:"code"`
+	Code         string     `json:"code"` // one of the Warn constants
 	Target       uint32     `json:"target,omitempty"`
 	Space        string     `json:"space,omitempty"`
 	Start        *uint16    `json:"start,omitempty"`
@@ -109,8 +130,8 @@ func newReport() *Report {
 
 func (x *exporter) finishReport(sum *trace.FileSummary, h capture.Header, disorder bool) {
 	r := x.rep
-	maj, min := capture.VersionMajor, capture.VersionMinor
-	r.Format = "MBCAP draft " + strconv.Itoa(maj) + "." + strconv.Itoa(min)
+	maj, minor := capture.VersionMajor, capture.VersionMinor
+	r.Format = "MBCAP draft " + strconv.Itoa(maj) + "." + strconv.Itoa(minor)
 	r.Selection = x.eo.Selection.String()
 	r.TickNS, r.WallStart = h.TickNS, h.WallStart
 	for _, in := range sum.Inputs {
@@ -132,26 +153,27 @@ func (x *exporter) finishReport(sum *trace.FileSummary, h capture.Header, disord
 		}
 		units[tg.Unit]++
 	}
-	r.Warnings = []Warning{{Code: "format_draft", Text: "MBCAP is a draft format: readers of version 1.0 will not read this file"}}
+	r.Warnings = []Warning{{Code: WarnFormatDraft, Text: "MBCAP is a draft format: readers of version 1.0 will not read this file"}}
 	if r.Quality.CaptureDrops > 0 {
-		r.Warnings = append(r.Warnings, Warning{Code: "capture_drops", Text: "the capture host dropped packets: reads may be missing"})
+		r.Warnings = append(r.Warnings, Warning{Code: WarnCaptureDrops, Text: "the capture host dropped packets: reads may be missing"})
 	}
-	if r.Quality.Gaps > 0 {
-		r.Warnings = append(r.Warnings, Warning{Code: "gap_in_window", Text: "the trace has gaps: transactions in them are not in the capture"})
+	if x.gapsInWindow > 0 {
+		r.Warnings = append(r.Warnings, Warning{Code: WarnGapInWindow, Count: uint16(min(x.gapsInWindow, 65535)),
+			Text: "gaps or resyncs in the exported window touched transactions: their values are missing from the capture"})
 	}
 	if disorder {
-		r.Warnings = append(r.Warnings, Warning{Code: "time_disorder", Text: "samples are more than a second out of time order (merged captures, clock steps)"})
+		r.Warnings = append(r.Warnings, Warning{Code: WarnTimeDisorder, Text: "samples are more than a second out of time order (merged captures, clock steps)"})
 	}
 	for _, tg := range x.tlist {
 		if units[tg.Unit] > 1 {
-			r.Warnings = append(r.Warnings, Warning{Code: "unit_collision", Target: tg.ID,
+			r.Warnings = append(r.Warnings, Warning{Code: WarnUnitCollision, Target: tg.ID,
 				Text: "another target uses the same unit ID: replay them separately (--target, --port) or remap one with --unit"})
 		}
-		if tg.role == "structure" {
-			r.Warnings = append(r.Warnings, Warning{Code: "role_guessed", Target: tg.ID, Text: "the server was decided from the traffic's structure only"})
+		if tg.role == mbtcp.RoleStructure.String() {
+			r.Warnings = append(r.Warnings, Warning{Code: WarnRoleGuessed, Target: tg.ID, Text: "the server was decided from the traffic's structure only"})
 		}
 		if tg.rep.Samples == 1 {
-			r.Warnings = append(r.Warnings, Warning{Code: "single_sample_target", Target: tg.ID, Text: "the target was read once"})
+			r.Warnings = append(r.Warnings, Warning{Code: WarnSingleSample, Target: tg.ID, Text: "the target was read once"})
 		}
 		r.Warnings = append(r.Warnings, x.staleAfterWrite(tg)...)
 	}
@@ -159,7 +181,7 @@ func (x *exporter) finishReport(sum *trace.FileSummary, h capture.Header, disord
 	r.Replay.ChangedValues = r.changed
 	r.Replay.EstimatedInMemoryBytes = 12<<20 + 750*r.SamplesWritten + 36*r.changed
 	if x.eo.WarnReplayMemory > 0 && r.Replay.EstimatedInMemoryBytes > uint64(x.eo.WarnReplayMemory) {
-		r.Warnings = append(r.Warnings, Warning{Code: "replay_memory",
+		r.Warnings = append(r.Warnings, Warning{Code: WarnReplayMemory,
 			Text: "a replay of this capture needs about " + strconv.FormatUint(r.Replay.EstimatedInMemoryBytes>>20, 10) + " MiB: export a shorter time window"})
 	}
 }
@@ -196,7 +218,7 @@ func (x *exporter) staleAfterWrite(tg *target) []Warning {
 		}
 		wt, rt := time.Unix(0, at).UTC(), time.Unix(0, lastRead).UTC()
 		start := k.start
-		out = append(out, Warning{Code: "stale_after_write", Target: tg.ID, Space: k.space, Start: &start, Count: k.count,
+		out = append(out, Warning{Code: WarnStaleAfterWrite, Target: tg.ID, Space: k.space, Start: &start, Count: k.count,
 			WriteTime: &wt, LastReadTime: &rt, Text: "a write came after the last read of this range: the replay keeps the value from before it"})
 	}
 	return out

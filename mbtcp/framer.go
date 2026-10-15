@@ -24,8 +24,8 @@ const DefaultResyncLimit = 64 << 10
 
 // Header is an MBAP header.
 type Header struct {
-	TID     uint16
-	ProtoID uint16
+	TID     uint16 // transaction identifier
+	ProtoID uint16 // protocol identifier: 0 for Modbus
 	Length  uint16 // bytes after the length field: unit ID and PDU
 	Unit    uint8
 }
@@ -67,11 +67,11 @@ const (
 type ADU struct {
 	Pos     uint64 // stream position of the first header byte
 	Size    int    // bytes on the wire, header included
-	TID     uint16
-	ProtoID uint16
-	Unit    uint8
-	PDU     []byte
-	Missing int // PDU bytes the snap length cut (Truncated)
+	TID     uint16 // MBAP transaction identifier
+	ProtoID uint16 // MBAP protocol identifier (non-zero: a foreign frame)
+	Unit    uint8  // MBAP unit identifier
+	PDU     []byte // function code and data
+	Missing int    // PDU bytes the snap length cut (Truncated)
 	Flags   Flags
 }
 
@@ -84,8 +84,13 @@ const (
 	ByRunEnd                           // the captured bytes end exactly at the announced length
 )
 
+// String returns the confidence as the JSON output names it.
 func (c Confidence) String() string {
-	return [...]string{"", "next_header", "run_end"}[c]
+	names := [...]string{"", "next_header", "run_end"}
+	if int(c) >= len(names) {
+		return "unknown"
+	}
+	return names[c]
 }
 
 // JunkReason says why bytes were not framed.
@@ -98,8 +103,13 @@ const (
 	Incomplete                         // a partial ADU cut by a gap, or by the end of the stream
 )
 
+// String returns the reason as the JSON output names it.
 func (r JunkReason) String() string {
-	return [...]string{"", "skipped", "resync_failed", "incomplete"}[r]
+	names := [...]string{"", "skipped", "resync_failed", "incomplete"}
+	if int(r) >= len(names) {
+		return "unknown"
+	}
+	return names[r]
 }
 
 // Sink receives what a framer finds.

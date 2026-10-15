@@ -5,7 +5,9 @@ package pcapio
 import (
 	"bytes"
 	"compress/gzip"
+	"encoding/binary"
 	"errors"
+	"io"
 	"testing"
 )
 
@@ -77,5 +79,57 @@ func TestIndexErrors(t *testing.T) {
 	d[len(d)/2&^3] ^= 0xFF
 	if _, err := NewIndex(bytes.NewReader(d), int64(len(d))); err != nil {
 		t.Errorf("damaged: %v", err)
+	}
+}
+
+// TestReadAtSubSecond: random access refuses a pcap record whose
+// sub-second part is out of range, as the sequential reader does.
+func TestReadAtSubSecond(t *testing.T) {
+	var buf bytes.Buffer
+	w, _ := NewPcapWriter(&buf, PcapOptions{LinkType: 1})
+	_ = w.WritePacket(t0, 0, []byte("x"))
+	_ = w.Flush()
+	b := buf.Bytes()
+	binary.LittleEndian.PutUint32(b[24+4:], 2_000_000) // µs part of 2 s
+	ix, err := NewIndex(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ix.ReadAt(bytes.NewReader(b), 24); !errors.Is(err, ErrCorrupt) {
+		t.Errorf("sub-second of 2 s: %v", err)
+	}
+}
+
+type failAfter struct {
+	r io.Reader
+}
+
+func (f *failAfter) Read(p []byte) (int, error) {
+	n, err := f.r.Read(p)
+	if err == io.EOF {
+		return n, errors.New("device gone")
+	}
+	return n, err
+}
+
+// TestDrainError: a read error at the end marks the tail truncated, so the
+// hash is known to cover only what was read.
+func TestDrainError(t *testing.T) {
+	var buf bytes.Buffer
+	w, _ := NewPcapWriter(&buf, PcapOptions{LinkType: 1})
+	_ = w.WritePacket(t0, 0, []byte("whole"))
+	_ = w.Flush()
+	b := append(buf.Bytes(), 1, 2, 3) // part of a record header, then an error
+	rd, err := NewReader(&failAfter{bytes.NewReader(b)}, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p Packet
+	n := 0
+	for rd.Next(&p) == nil {
+		n++
+	}
+	if n != 1 || !rd.Counters().TruncatedTail {
+		t.Errorf("%d packets, counters %+v", n, rd.Counters())
 	}
 }
