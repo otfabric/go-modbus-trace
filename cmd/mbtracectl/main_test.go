@@ -105,7 +105,7 @@ func TestExitCodes(t *testing.T) {
 		{"no command", nil, nil, exitOK}, // help
 		{"unknown flag", []string{"info", "--nope", path}, nil, exitUsage},
 		{"missing argument", []string{"flows"}, nil, exitUsage},
-		{"too many arguments", []string{"flows", path, path}, nil, exitUsage},
+		{"too many arguments", []string{"version", "extra"}, nil, exitUsage},
 		{"bad endpoint", []string{"flows", "--server", "not-an-ip", path}, nil, exitUsage},
 		{"bad score", []string{"flows", "--min-score", "2", path}, nil, exitUsage},
 		{"missing file", []string{"info", "/nonexistent/x.pcap"}, nil, exitError},
@@ -312,7 +312,7 @@ func TestExtract(t *testing.T) {
 	path, _ := fixture(t)
 	out := filepath.Join(filepath.Dir(path), "sub.pcapng")
 	code, stdout, errs := cli(t, nil, "extract", path, "-o", out, "--conn", "1")
-	if code != exitOK || !strings.Contains(stdout, "of 1 connections") {
+	if code != exitOK || !strings.Contains(stdout, "of 1 connection written") {
 		t.Fatalf("exit %d %s %s", code, errs, stdout)
 	}
 	code, stdout, _ = cli(t, nil, "flows", "--json", out)

@@ -115,12 +115,9 @@ func anyOf(m map[string]any) map[string]any {
 }
 
 func TestUnsupported(t *testing.T) {
-	defer func() {
-		if recover() == nil {
-			t.Error("a channel field did not panic")
-		}
-	}()
-	_, _ = Generate("", "", "", struct {
+	if _, err := Generate("", "", "", struct {
 		C chan int `json:"c"`
-	}{})
+	}{}); err == nil {
+		t.Error("a channel field gave a schema")
+	}
 }

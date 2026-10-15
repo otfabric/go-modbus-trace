@@ -21,15 +21,17 @@ Build this first (L1); everything else depends on it. It is exported so the appl
 | Real fixtures | a few small traces captured with tcpdump on loopback between the go-modbus client and server (and, if available, from OT Fabric's own test rigs) committed under `testdata/` with expected event JSON; `testdata/README.md` lists origin, tool versions and the command used | LA1, LA6 |
 | Export | MBCAP admission matrix, property test against `capture.NewChecker`, encodings round trip with `capture.Equal`, report identity | LA9 |
 | End to end | trace -> `export mbcap` -> pinned `mbcapctl verify` -> pinned `modbusctl server replay/static` -> go-modbus client reads equal the scripted values | LA10 |
-| Determinism | double run, cross-OS run, CLI equals library | LA11 |
-| Fuzz | native Go fuzz targets with seed corpora from the fixtures | LA14 |
+| Determinism | double run; `TestGoldenOutputs` hashes every output of `testdata/plant.pcapng` (MBCAP, JSON Lines, CSV, timeline, sub-trace, summary, flows, report) against `testdata/plant.outputs.json` on every target's own runner (cross-OS); `TestCLIEqualsLibrary` | LA11 |
+| Chaos | `trace/chaos_test.go`: seeded random traffic (many clients, servers and units, every function class, malformed and vendor PDUs, pipelining, reused and unanswered IDs, orphans, TCP faults, IP fragments, clock steps, tiny limits, corrupted bytes, cancellation) through every consumer, checking invariants that hold for any input: no recovered panic, counts that agree, provenance inside the trace and carrying the ADU, the export identity, a capture that reads back, a sub-trace that re-analyses the same. 150 seeds per run (`MBTRACE_CHAOS_SEEDS`, `MBTRACE_CHAOS_SEED`) | LA3, LA8, LA14 |
+| Concurrency | `TestConcurrentUse`: Analyze, Scan, Frames and Export on one `File` from 16 goroutines (run with `-race` in `make test`) give the sequential results; a stream is read by exactly one pass | L16 |
+| Fuzz | native Go fuzz targets with seed corpora from the fixtures; `make soak` (2 GiB in CI on pull requests) | LA14 |
 | Oracle | `tshark` differential test (advisory) | LA13 |
 | Build | cross-compile matrix, static check, forbidden-import check | LA15 |
 | Benchmarks | throughput, allocations, RSS at default limits | LA18 |
 
 ## 3. Fuzz targets
 
-`FuzzPcapReader`, `FuzzPcapngReader`, `FuzzLinkIPTCP`, `FuzzFramer`, `FuzzDecodeRequest`, `FuzzDecodeResponse`, `FuzzPipeline` (random bytes wrapped as a pcap with plausible headers so the fuzzer gets past the first parser). Properties: no panic, no allocation beyond the configured limits, termination, and for the pipeline: every ADU's provenance refers to packets that exist and whose payload bytes contain the ADU. CI runs the seed corpus on every push and a time-boxed run (30 s per target) on pull requests; a longer scheduled run is optional.
+`FuzzPcapReader`, `FuzzPcapngReader`, `FuzzLinkIPTCP`, `FuzzFramer`, `FuzzDecodeRequest`, `FuzzDecodeResponse`, `FuzzPipeline` (random bytes wrapped as a pcap with plausible headers so the fuzzer gets past the first parser). Properties: no panic, termination, and for the pipeline: no recovered panic, every connection opened is closed, and every ADU's provenance refers to packets that exist and whose payload bytes are the ADU (checked through `File.Frames`). Memory bounds are tested by the hostile-input tests of `internal/flow` and `internal/link` (empty and one-byte held segments, a million tiny fragments) and by the soak run. CI runs the seed corpus on every push and a time-boxed run (30 s per target) on pull requests; a longer scheduled run is optional.
 
 ## 4. Oracle: Wireshark's dissector
 

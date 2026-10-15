@@ -115,3 +115,17 @@ func TestCaps(t *testing.T) {
 		t.Errorf("overflow %d %d", dev.Result().Overflow, pat.Result().Overflow)
 	}
 }
+
+// TestCoverageKeyCap: coverage keeps at most MaxCoverageSpaces server,
+// unit and space keys and counts the ranges of the others.
+func TestCoverageKeyCap(t *testing.T) {
+	c := NewCoverage()
+	for i := range MaxCoverageSpaces + 5 {
+		srv := netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, byte(i >> 16), byte(i >> 8), byte(i)}), 502)
+		_ = c.Event(&model.Event{Txn: &model.Transaction{Status: model.StatusOK, Server: srv, Unit: 1,
+			Ranges: []mbtcp.Range{{Space: mbtcp.Holding, Start: 0, Count: 1}}}})
+	}
+	if n := len(c.Result()); n != MaxCoverageSpaces || c.Overflow() != 5 {
+		t.Errorf("%d keys, overflow %d", n, c.Overflow())
+	}
+}

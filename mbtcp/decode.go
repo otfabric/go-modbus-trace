@@ -66,8 +66,8 @@ type View struct {
 	Name      string   `json:"name"`
 	Known     bool     `json:"known"` // in the coverage table
 	Exception bool     `json:"exception,omitempty"`
-	Code      uint8    `json:"exception_code,omitempty"`
-	Sub       *uint16  `json:"sub,omitempty"` // FC08 sub-function, FC43 MEI type
+	Code      uint8    `json:"exception_code,omitempty"` // exception code of an exception response
+	Sub       *uint16  `json:"sub,omitempty"`            // FC08 sub-function, FC43 MEI type
 	Class     Class    `json:"class"`
 	Ranges    []Range  `json:"ranges,omitempty"`
 	Fields    []Field  `json:"fields,omitempty"`

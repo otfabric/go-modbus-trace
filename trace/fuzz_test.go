@@ -7,6 +7,8 @@ import (
 	"context"
 	"encoding/binary"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/otfabric/go-modbus-trace/model"
@@ -66,9 +68,17 @@ func FuzzPipeline(f *testing.F) {
 		if uint64(len(flows)) != sum.Connections.Total {
 			t.Fatalf("%d flows, %d connections", len(flows), sum.Connections.Total)
 		}
-		// The full analysis of the same bytes: no panic, consistent events.
+		// The full analysis of the same bytes: no panic, consistent events,
+		// and provenance that points at packets carrying the ADU (TESTING.md
+		// section 3).
+		path := filepath.Join(t.TempDir(), "f.pcap")
+		if err := os.WriteFile(path, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		file, _ := Open(path)
 		var opens, closes int
-		_, err = Analyze(context.Background(), OpenReader(bytes.NewReader(raw)), Options{ScanOptions: ScanOptions{Limits: Limits{MaxConns: 2,
+		var adus []*model.ADU
+		asum, err := Analyze(context.Background(), file, Options{ScanOptions: ScanOptions{Limits: Limits{MaxConns: 2,
 			BufferPerDir: 512, BufferTotal: 1024, ResyncScan: 128}}, MaxOutstanding: 4}, SinkFunc(func(e *model.Event) error {
 			switch e.Kind {
 			case model.KindConnOpen:
@@ -79,11 +89,41 @@ func FuzzPipeline(f *testing.F) {
 				if e.Txn.Request == nil && e.Txn.Response == nil {
 					t.Fatal("a transaction without ADUs")
 				}
+				for _, a := range []*model.ADU{e.Txn.Request, e.Txn.Response} {
+					if a != nil {
+						adus = append(adus, a)
+					}
+				}
 			}
 			return nil
 		}))
-		if err != nil || opens != closes || uint64(opens) != sum.Connections.Total {
-			t.Fatalf("err %v, %d opens, %d closes, %d connections", err, opens, closes, sum.Connections.Total)
+		if err != nil || opens != closes || uint64(opens) != sum.Connections.Total || asum.InternalErrorCount > 0 {
+			t.Fatalf("err %v, %d opens, %d closes, %d connections, internal errors %+v", err, opens, closes, sum.Connections.Total, asum.InternalErrors)
+		}
+		for _, a := range adus {
+			for _, r := range a.Refs {
+				if r.Frame == 0 || r.Frame > asum.Packets {
+					t.Fatalf("frame %d of %d", r.Frame, asum.Packets)
+				}
+			}
+			if a.Size != 7+len(a.PDU) {
+				continue // cut short: the frames hold less
+			}
+			frs, err := file.Frames(a.Refs)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got []byte
+			for _, fr := range frs {
+				got = append(got, fr.Payload...)
+			}
+			want := tracetest.MBAP(a.TID, a.Unit, a.PDU)
+			if len(got) == len(want) {
+				copy(want[2:4], got[2:4]) // a foreign frame keeps its protocol ID
+			}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("ADU %x, frames carry %x", want, got)
+			}
 		}
 	})
 }
