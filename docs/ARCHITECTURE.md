@@ -43,7 +43,8 @@ Bounds (defaults; all configurable through `trace.Limits`, all with a counter in
 | IP fragments buffered (total) | 16 MiB | oldest datagram dropped; `fragments.dropped` |
 | Captured packet size | 256 KiB | pcap: the read ends with `ErrCorrupt`; pcapng: the block is skipped (`skipped_blocks`) |
 | pcapng block size | 16 MiB | the read ends with `ErrCorrupt` (an implausible length) |
-| Patterns / coverage intervals | 10,000 / 4,096 per space | new keys are folded into an `other` bucket; `analyzer_overflow` |
+| Analyzer keys: devices (server, unit) / clients per device / poll patterns / coverage ranges per server, unit and space | 10,000 / 256 / 10,000 / 4,096 | new keys are not recorded; their transactions (ranges) are counted in the analyzer's `overflow` |
+| MBCAP export, per target: writes / read ranges / other requests remembered for the report | 4,096 most recent / 65,536 / 65,536 | a `stale_after_write` warning may be missed; the replay estimate counts every response as changed (still an upper bound) |
 | Timeline reorder window (`--order time`) | 60 s of trace time and 64 MiB of encoded rows | later events are emitted out of order; counted (`Stats.Late`) |
 
 ## 3. Packages and dependencies
@@ -210,25 +211,27 @@ type Event struct { Kind string; Time time.Time; Conn *Connection; Txn *Transact
 
 **Counters** (file summary; each has a documented meaning; the per-transaction flags of section 10 follow in L2): `retransmitted`, `out_of_order`, `overlap_conflict`, `keepalives`, `syn_retransmits`, `gaps`, `gap_bytes`, `reassembly_overflow` (a direction's buffer limit declared a gap), `reassembly_budget` (the total budget declared a gap), `resyncs`, `resync_failed`, `junk_bytes` (payload bytes that framed as nothing), `foreign_protocol`, `snaplen_truncated` (ADUs), `snaplen.truncated_packets`, `snaplen.payload_bytes_cut`, `time_backwards` (packets stamped before the previous one), `connections.{total, midstream, evicted, superseded, max_tracked, packets_after_close}`, `reader.{simple_packets, skipped_blocks, unknown_blocks, other_frames, truncated_tail}`, `fragments.{reassembled, dropped, incomplete}`, `unsupported.<reason>` (section 5), `capture_drops` (pcapng `isb_ifdrop`), `internal_errors` (recovered panics with their frame numbers, at most 100 kept).
 
-**Analyzers** implement `Sink` and are composed by the caller (`analyze.Overview`, `.Devices`, `.Patterns`, `.Coverage`); each returns a JSON-able result and reports its overflow counters. Latency uses a fixed log-scale histogram (about 1% relative resolution, no allocation per event). Patterns key on `(client addr, server endpoint, unit, function, request PDU bytes)` and track inter-request gaps with min/max/median (histogram) and jitter (median absolute deviation of the gap); volatility = changed responses / polls (a 64-bit hash of the response PDU, no storage of values).
+**Analyzers** implement `Sink` and are composed by the caller (`analyze.Overview`, `.Devices`, `.Patterns`, `.Coverage`); each returns a JSON-able result and reports its overflow counters. Latency uses a fixed log-scale histogram (about 1% relative resolution, no allocation per event). Patterns key on `(client addr, server endpoint, unit, function, request PDU bytes)` and track inter-request gaps with min/max/median (histogram) and jitter (median absolute deviation of the gap); volatility = changed responses / (responses - 1) (a 64-bit FNV hash of the response PDU, no storage of values). Devices count by function and status, keep up to 256 clients and a latency histogram. Coverage keeps, per server, unit and data space, merged inclusive ranges read and written. *(L3)* `mbtracectl summary` runs the four together with `Tee` in one `Analyze` pass.
 
-**API** (L2: implemented as below up to `timeline.Write`; `docs/API.md` and godoc are authoritative; the rest is proposed):
+**API** (implemented; `docs/API.md` and godoc are authoritative):
 
 ```go
 f, err := trace.Open(path)                                  // detect, read headers; ErrNotSeekable-aware
+f, err = trace.OpenFiles(paths...)                          // several files, one trace; FrameRef.Part names the file
 sum, flows, err := trace.Scan(ctx, f, trace.ScanOptions{})  // pass 1
 opts := trace.Options{ScanOptions: trace.ScanOptions{ServerPorts: []uint16{502, 1502}}, Flows: ids}
 sum, err = trace.Analyze(ctx, f, opts, sink)                 // pass 2; sink gets model.Event; sum has the transaction counters
 frames, err := f.Frames(txn.Request.Refs)                    // random access to provenance
 view := mbtcp.Decode(mbtcp.AsRequest, pdu)                  // display decoding
-rep, err := mbcapexport.Export(ctx, f, opts, sel, mbcapexport.Options{...}, capture.Writer) // re-streams the trace
+rep, err := mbcapexport.Export(ctx, f, opts, mbcapexport.Options{Producer: ..., Selection: sel}, open) // open(header) returns a capture.Writer
 sum, stats, err := timeline.Write(ctx, f, opts, w, timeline.Options{Format: timeline.CSV, Selection: sel})
-err = subtrace.Extract(ctx, f, sel, w)                       // pcapng
+stats, err := subtrace.Extract(ctx, f, opts.ScanOptions, subtrace.Options{Selection: sel, Tool: ...}, w) // pcapng
+err = trace.Walk(ctx, f, opts.ScanOptions, fn)              // every raw packet with its connection ID
 ```
 
 A `Sink` returning an error stops the pass. `Analyze` honors `ctx` between packets and reports progress through an optional `Progress(bytesRead, total)` callback (rate-limited by the library).
 
-**CLI** (names and flags proposed; modbusctl conventions):
+**CLI** (implemented; modbusctl conventions):
 
 ```
 mbtracectl info      <trace>                       file summary, interfaces, link types, drops, snaplen facts
@@ -239,7 +242,7 @@ mbtracectl export mbcap     <trace>... -o out.mbcap [selection flags] [--change-
                             [--tick-ns 1000] [--report report.json] [--name ip:port/unit=Label]
                             [--warn-replay-memory 1GiB]
 mbtracectl export timeline  <trace>... -o out.csv|out.jsonl [selection flags]
-mbtracectl extract   <trace> -o sub.pcapng [selection flags]
+mbtracectl extract   <trace>... -o sub.pcapng [--server] [--client] [--conn] [--from/--to]
 mbtracectl version
 selection flags: --server ip[:port]  --unit 1,2  --client ip  --conn 12  --fc 3,4,43  --status ok,exception
                  --class read  --flag midstream  --no-flag uncertain  --range holding:4096-4200
@@ -248,7 +251,9 @@ selection flags: --server ip[:port]  --unit 1,2  --client ip  --conn 12  --fc 3,
 
 *(L2)* In the commands that analyse, `--server` and `--client` both select and tell the role decision who the server and the client are (naming a server to look at asserts that it is one); in `flows` they only override the roles. Timeline ordering `--order time` holds encoded rows in a reorder window of 60 s of trace time and at most 64 MiB (`timeline.DefaultBuffer`): when the buffer is full the oldest row is written early; later rows older than the last one written are written out of order and counted (`Stats.Late`).
 
-`<trace>` is a path or `-`. Several traces given in time order are one continuous trace (connection state carries across files; this is how rotated tcpdump `-C`/`-G` files are analyzed). A remote one-liner works: `ssh gw 'tcpdump -i eth0 -w - port 502' | mbtracectl export mbcap - -o site.mbcap` (WallStart is then the first packet time and earlier-stamped packets are reported, since the minimum timestamp cannot be known in advance).
+`<trace>` is a path or `-`. Several traces given in time order are one continuous trace (connection state carries across files; this is how rotated tcpdump `-C`/`-G` files are analyzed). A remote one-liner works: `ssh gw 'tcpdump -i eth0 -w - port 502' | mbtracectl export mbcap - -o site.mbcap` (*L3*: the exporter spools samples to a temporary file and writes the header after the pass, so WallStart is the earliest timestamp for a stream too).
+
+*(L3)* Several files: `trace.OpenFiles` reads them in the order given as one trace; connection, reassembly and pairing state carry across, every `FrameRef` names its file by `Part` (omitted for the first), and `FileSummary.Inputs` lists each file. `File.Frames` needs files (`ErrNotSeekable` for a stream). `extract` selects connections and a time window only: transaction-level flags (`--unit`, `--fc`, ...) do not apply to packets and are refused; either end of a connection may match `--server` or `--client`, since roles are not decided there; interfaces are written as their packets first appear, binary or sub-nanosecond `if_tsresol` as nanoseconds.
 
 ## 12. Milestones, the L0 spike, measured numbers
 
@@ -278,6 +283,10 @@ selection flags: --server ip[:port]  --unit 1,2  --client ip  --conn 12  --fc 3,
 
 **L2 outcome** (2026-10-15): PDU decoders and validation for every function of the coverage matrix (`docs/COVERAGE.md`), pairing, the event model (`model`, schema `docs/schema/event-1.schema.json`, validated by tests), `trace.Analyze`, `File.Frames`, `selection`, `export/timeline` (CSV, JSON Lines), `mbtracectl summary`, `timeline`, `export timeline`. LA6 with frames from a real go-modbus v1.7.1 client and server over loopback (every function the client supports, FC08 sub-functions, an exception, a paged FC43/14), LA7, LA8, LA16. A real tcpdump fixture (TESTING.md) is not committed: capturing needs privileges the tests do not have; the go-modbus bridge gives the same frames.
 
+**L3 outcome** (2026-10-15): `export/mbcapexport` (admission, targets and streams, header tags and provenance, report with every warning, the replay estimate), `mbtracectl export mbcap` to the three encodings, several input files as one trace. LA9 (the admission matrix, the classifier against `capture.NewChecker` for every function code, sub-function and MEI type, the three encodings equal under `capture.Diff`, the report identity), LA10 (`TestReplayEndToEnd` against the pinned `mbcapctl` v0.0.2 and `modbusctl` v3.2.0: values read back through `server static` and `server replay` equal the script; a CI job), LA11.
+
+**L4 outcome** (2026-10-15): `analyze` (overview, devices, patterns, coverage), `summary` on them, `export/subtrace` and `mbtracectl extract` (LA12: tshark reads the sub-trace with the same frames and times), the tshark oracle (LA13, advisory, triaged in TESTING.md), JSON Schemas for every CLI document generated from the Go types and validated against real output (L22), the `testdata/plant.pcapng` fixture, benchmarks (LA18), release files, v0.1.0.
+
 **Measured numbers** (filled in by L0 and L4): throughput of `Scan` and `Analyze` per core; resident memory at default limits; pcapng write speed; machine and commit.
 
 | Measured in L0 (spike, Apple M1, Go 1.27.2, `db97366` + L0 change) | Value |
@@ -294,7 +303,12 @@ selection flags: --server ip[:port]  --unit 1,2  --client ip  --conn 12  --fc 3,
 | `mbtracectl summary` (`Analyze`), 1 GiB synthetic pcap, 2.5 M transactions | 7.4-7.6 s (about 140 MiB/s), peak RSS 26-27 MiB |
 | `mbtracectl export timeline` to JSON Lines, same file | 26 s, 6.3 GB written, peak RSS 173 MiB (64 MiB reorder buffer) |
 
-PDU decoding, roles and pairing are not in the spike; `Scan` and `Analyze` are measured again at L4.
+PDU decoding, roles and pairing are not in the spike; `Scan` and `Analyze` are measured again at L4:
+
+| Measured in L4 (Apple M1, Go 1.27.2, branch `feat/l3-l4` on `26fde34`, `make bench`) | Value |
+|---|---|
+| `BenchmarkScan`, 32 MiB generated trace, 100 connections, losses and reordering | 768 MB/s per core (SHA-256 included) |
+| `BenchmarkAnalyze`, same trace (decode, pair, provenance, events counted) | 206 MB/s per core (L23 asks for 100 MB/s) |
 
 ## 13. Dependency resolution log
 

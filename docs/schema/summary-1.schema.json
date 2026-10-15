@@ -1,0 +1,981 @@
+{
+  "$defs": {
+    "analyze.CoverageResult": {
+      "additionalProperties": false,
+      "properties": {
+        "overflow": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "read": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/analyze.Interval"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "server": {
+          "type": "string"
+        },
+        "space": {
+          "type": "string"
+        },
+        "unit": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "written": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/analyze.Interval"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "overflow",
+        "read",
+        "server",
+        "space",
+        "unit",
+        "written"
+      ],
+      "type": "object"
+    },
+    "analyze.DeviceResult": {
+      "additionalProperties": false,
+      "properties": {
+        "by_function": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "by_status": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clients": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "clients_overflow": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "first": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "last": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "latency": {
+          "$ref": "#/$defs/analyze.DurationStats"
+        },
+        "request_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "response_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "server": {
+          "type": "string"
+        },
+        "transactions": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unit": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "by_function",
+        "by_status",
+        "clients",
+        "clients_overflow",
+        "request_bytes",
+        "response_bytes",
+        "server",
+        "transactions",
+        "unit"
+      ],
+      "type": "object"
+    },
+    "analyze.DevicesResult": {
+      "additionalProperties": false,
+      "properties": {
+        "devices": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/analyze.DeviceResult"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overflow": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "devices",
+        "overflow"
+      ],
+      "type": "object"
+    },
+    "analyze.DurationStats": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_ns": {
+          "type": "integer"
+        },
+        "min_ns": {
+          "type": "integer"
+        },
+        "p50_ns": {
+          "type": "integer"
+        },
+        "p95_ns": {
+          "type": "integer"
+        },
+        "p99_ns": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "max_ns",
+        "min_ns",
+        "p50_ns",
+        "p95_ns",
+        "p99_ns"
+      ],
+      "type": "object"
+    },
+    "analyze.Interval": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "end": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "first": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "last": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "start": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "count",
+        "end",
+        "start"
+      ],
+      "type": "object"
+    },
+    "analyze.OverviewResult": {
+      "additionalProperties": false,
+      "properties": {
+        "by_class": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "by_function": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "by_status": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "connections": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "duration_ns": {
+          "type": "integer"
+        },
+        "first": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "flags": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gaps": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "last": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "resyncs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transactions": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "by_class",
+        "by_function",
+        "by_status",
+        "connections",
+        "duration_ns",
+        "flags",
+        "gaps",
+        "resyncs",
+        "transactions"
+      ],
+      "type": "object"
+    },
+    "analyze.PatternResult": {
+      "additionalProperties": false,
+      "properties": {
+        "changed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "client": {
+          "type": "string"
+        },
+        "count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "first": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "function": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "interval": {
+          "$ref": "#/$defs/analyze.DurationStats"
+        },
+        "jitter_ns": {
+          "type": "integer"
+        },
+        "last": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "request_pdu": {
+          "type": "string"
+        },
+        "responses": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "server": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "unit": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "volatility": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "changed",
+        "client",
+        "count",
+        "function",
+        "jitter_ns",
+        "request_pdu",
+        "responses",
+        "server",
+        "summary",
+        "unit",
+        "volatility"
+      ],
+      "type": "object"
+    },
+    "analyze.PatternsResult": {
+      "additionalProperties": false,
+      "properties": {
+        "overflow": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "patterns": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/analyze.PatternResult"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "overflow",
+        "patterns"
+      ],
+      "type": "object"
+    },
+    "mbtracectl.summaryJSON": {
+      "additionalProperties": false,
+      "properties": {
+        "coverage": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/analyze.CoverageResult"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "devices": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/analyze.DevicesResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "overview": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/analyze.OverviewResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "patterns": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/analyze.PatternsResult"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schema_version": {
+          "type": "integer"
+        },
+        "selection": {
+          "type": "string"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/trace.FileSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "coverage",
+        "devices",
+        "overview",
+        "patterns",
+        "schema_version",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "trace.ConnCounters": {
+      "additionalProperties": false,
+      "properties": {
+        "evicted": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_tracked": {
+          "type": "integer"
+        },
+        "midstream": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "packets_after_close": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "superseded": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "total": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "evicted",
+        "max_tracked",
+        "midstream",
+        "packets_after_close",
+        "superseded",
+        "total"
+      ],
+      "type": "object"
+    },
+    "trace.FileSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "capture_drops": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "connections": {
+          "$ref": "#/$defs/trace.ConnCounters"
+        },
+        "error": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "first": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "fragments": {
+          "$ref": "#/$defs/trace.Fragments"
+        },
+        "gzip": {
+          "type": "boolean"
+        },
+        "input_bytes": {
+          "type": "integer"
+        },
+        "inputs": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/trace.Input"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "interfaces": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/trace.Interface"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "internal_errors": {
+          "items": {
+            "$ref": "#/$defs/trace.InternalError"
+          },
+          "type": "array"
+        },
+        "last": {
+          "format": "date-time",
+          "type": "string"
+        },
+        "packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "quality": {
+          "$ref": "#/$defs/trace.Quality"
+        },
+        "reader": {
+          "$ref": "#/$defs/trace.ReaderCounters"
+        },
+        "sections": {
+          "items": {
+            "$ref": "#/$defs/trace.Section"
+          },
+          "type": "array"
+        },
+        "sha256": {
+          "type": "string"
+        },
+        "snaplen": {
+          "$ref": "#/$defs/trace.Snaplen"
+        },
+        "time_backwards": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "transaction_flags": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "transactions": {
+          "additionalProperties": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "type": "object"
+        },
+        "unsupported": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "bytes",
+        "connections",
+        "file",
+        "format",
+        "fragments",
+        "gzip",
+        "input_bytes",
+        "inputs",
+        "interfaces",
+        "packets",
+        "quality",
+        "reader",
+        "sha256",
+        "snaplen",
+        "time_backwards",
+        "unsupported"
+      ],
+      "type": "object"
+    },
+    "trace.Fragments": {
+      "additionalProperties": false,
+      "properties": {
+        "dropped": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "incomplete": {
+          "type": "integer"
+        },
+        "reassembled": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "dropped",
+        "incomplete",
+        "reassembled"
+      ],
+      "type": "object"
+    },
+    "trace.Input": {
+      "additionalProperties": false,
+      "properties": {
+        "file": {
+          "type": "string"
+        },
+        "format": {
+          "type": "string"
+        },
+        "gzip": {
+          "type": "boolean"
+        },
+        "input_bytes": {
+          "type": "integer"
+        },
+        "packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sha256": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "file",
+        "format",
+        "gzip",
+        "input_bytes",
+        "packets",
+        "sha256"
+      ],
+      "type": "object"
+    },
+    "trace.Interface": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "drops": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "id": {
+          "type": "integer"
+        },
+        "link": {
+          "type": "string"
+        },
+        "link_type": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "part": {
+          "type": "integer"
+        },
+        "section": {
+          "type": "integer"
+        },
+        "snaplen": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tsresol": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "link",
+        "link_type",
+        "packets",
+        "part",
+        "section",
+        "snaplen",
+        "tsresol"
+      ],
+      "type": "object"
+    },
+    "trace.InternalError": {
+      "additionalProperties": false,
+      "properties": {
+        "frame": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "frame",
+        "message"
+      ],
+      "type": "object"
+    },
+    "trace.Quality": {
+      "additionalProperties": false,
+      "properties": {
+        "foreign_protocol": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "gap_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "gaps": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "junk_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "keepalives": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "out_of_order": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "overlap_conflict": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reassembly_budget": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reassembly_overflow": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resync_failed": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "resyncs": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "retransmitted": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snaplen_truncated": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "syn_retransmits": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "foreign_protocol",
+        "gap_bytes",
+        "gaps",
+        "junk_bytes",
+        "keepalives",
+        "out_of_order",
+        "overlap_conflict",
+        "reassembly_budget",
+        "reassembly_overflow",
+        "resync_failed",
+        "resyncs",
+        "retransmitted",
+        "snaplen_truncated",
+        "syn_retransmits"
+      ],
+      "type": "object"
+    },
+    "trace.ReaderCounters": {
+      "additionalProperties": false,
+      "properties": {
+        "other_frames": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "simple_packets": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "skipped_blocks": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated_tail": {
+          "type": "boolean"
+        },
+        "unknown_blocks": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "other_frames",
+        "simple_packets",
+        "skipped_blocks",
+        "truncated_tail",
+        "unknown_blocks"
+      ],
+      "type": "object"
+    },
+    "trace.Section": {
+      "additionalProperties": false,
+      "properties": {
+        "application": {
+          "type": "string"
+        },
+        "comment": {
+          "type": "string"
+        },
+        "hardware": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string"
+        },
+        "part": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "part"
+      ],
+      "type": "object"
+    },
+    "trace.Snaplen": {
+      "additionalProperties": false,
+      "properties": {
+        "max": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "payload_bytes_cut": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "truncated_packets": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "max",
+        "payload_bytes_cut",
+        "truncated_packets"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/summary-1.schema.json",
+  "$ref": "#/$defs/mbtracectl.summaryJSON",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The file summary and the analyzers: overview, devices, patterns, coverage.",
+  "title": "mbtracectl summary --json"
+}

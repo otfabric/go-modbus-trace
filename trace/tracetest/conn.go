@@ -458,3 +458,13 @@ func (c *Conn) Reset(d Dir) {
 
 // MustEndpoint parses ip:port and panics on error (for tests).
 func MustEndpoint(s string) netip.AddrPort { return netip.MustParseAddrPort(s) }
+
+// ConnContinue carries a connection over into b, a second file of the same
+// trace (rotated captures): sequence numbers, roles and the clock continue.
+func (b *Builder) ConnContinue(c *Conn) *Conn {
+	n := *c
+	n.b = b
+	b.now = max(b.now, c.b.now)
+	b.conns = max(b.conns, c.b.conns)
+	return &n
+}

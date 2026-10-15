@@ -153,21 +153,29 @@ func TestEnvironment(t *testing.T) {
 func TestSummary(t *testing.T) {
 	path, _ := fixture(t)
 	code, out, errs := cli(t, nil, "summary", path)
-	if code != exitOK || !strings.Contains(out, "transactions: ok=4") || !strings.Contains(out, "10.0.0.2:1502  1") {
+	if code != exitOK || !strings.Contains(out, "transactions: ok=4") || !strings.Contains(out, "10.0.0.2:1502  1") ||
+		!strings.Contains(out, "Read 2 holding registers @ 100") || !strings.Contains(out, "holding: 100-101") {
 		t.Fatalf("exit %d, stderr %q, output:\n%s", code, errs, out)
 	}
 	code, out, _ = cli(t, nil, "summary", "--json", "--fc", "3", path)
 	var doc struct {
 		Selection string `json:"selection"`
-		Devices   []struct {
-			Server       string `json:"server"`
-			Transactions int    `json:"transactions"`
+		Devices   struct {
+			Devices []struct {
+				Server       string `json:"server"`
+				Transactions int    `json:"transactions"`
+			} `json:"devices"`
 		} `json:"devices"`
+		Patterns struct {
+			Patterns []struct {
+				Count int `json:"count"`
+			} `json:"patterns"`
+		} `json:"patterns"`
 	}
 	if err := json.Unmarshal([]byte(out), &doc); err != nil || code != exitOK {
 		t.Fatalf("%v %d", err, code)
 	}
-	if doc.Selection != "fc=3" || len(doc.Devices) != 1 || doc.Devices[0].Transactions != 4 {
+	if doc.Selection != "fc=3" || len(doc.Devices.Devices) != 1 || doc.Devices.Devices[0].Transactions != 4 || doc.Patterns.Patterns[0].Count != 4 {
 		t.Errorf("%+v", doc)
 	}
 }
@@ -247,5 +255,74 @@ func TestSelectionFlags(t *testing.T) {
 		if code, _, _ := cli(t, nil, append([]string{"timeline", path}, b...)...); code != exitUsage {
 			t.Errorf("%v: exit %d", b, code)
 		}
+	}
+}
+
+func TestExportMBCAP(t *testing.T) {
+	path, data := fixture(t)
+	dir := filepath.Dir(path)
+	out, rep := filepath.Join(dir, "site.mbcap"), filepath.Join(dir, "site.report.json")
+	code, stdout, errs := cli(t, nil, "export", "mbcap", path, "-o", out, "--report", rep, "--name", "10.0.0.2:1502/1=Pump")
+	if code != exitOK || !strings.Contains(stdout, "4 samples written") || !strings.Contains(stdout, "Pump") {
+		t.Fatalf("exit %d, %s\n%s", code, errs, stdout)
+	}
+	var r struct {
+		SamplesWritten int `json:"samples_written"`
+	}
+	b, _ := os.ReadFile(rep)
+	if err := json.Unmarshal(b, &r); err != nil || r.SamplesWritten != 4 {
+		t.Errorf("report %s", b)
+	}
+	if b, _ := os.ReadFile(out); !bytes.HasPrefix(b, []byte("\x89MBCAP")) {
+		t.Errorf("not a binary capture: % x", b[:min(8, len(b))])
+	}
+	// stdin streaming to JSON Lines on stdout.
+	code, stdout, _ = cli(t, data, "export", "mbcap", "-", "-o", "-")
+	if code != exitOK || !strings.HasPrefix(stdout, "{") || strings.Count(stdout, "\n") < 7 {
+		t.Errorf("stdin: exit %d\n%s", code, stdout)
+	}
+	// Several inputs are one trace; - cannot join them.
+	if code, _, errs := cli(t, nil, "export", "mbcap", path, path, "-o", filepath.Join(dir, "two.mbcap.jsonl")); code != exitOK {
+		t.Errorf("two inputs: exit %d %s", code, errs)
+	}
+	for _, bad := range [][]string{
+		{path, "-", "-o", filepath.Join(dir, "x.mbcap")},
+		{path, "-o", path, "--format", "jsonl"},
+		{path, "-o", filepath.Join(dir, "x.txt")},
+		{path, "-o", filepath.Join(dir, "x.mbcap"), "--tick-ns", "0"},
+		{path, "-o", filepath.Join(dir, "x.mbcap"), "--name", "Pump"},
+		{path, "-o", filepath.Join(dir, "x.mbcap"), "--warn-replay-memory", "lots"},
+		{path, "-o", filepath.Join(dir, "x.mbcap"), "--compression", "zip"},
+		{path},
+	} {
+		if code, _, _ := cli(t, nil, append([]string{"export", "mbcap"}, bad...)...); code != exitUsage {
+			t.Errorf("%v: exit %d", bad, code)
+		}
+	}
+	// A failure leaves no output behind.
+	if code, _, _ := cli(t, []byte("garbage"), "export", "mbcap", "-", "-o", filepath.Join(dir, "bad.mbcap")); code != exitError {
+		t.Errorf("garbage: exit %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "bad.mbcap")); err == nil {
+		t.Error("partial output left behind")
+	}
+}
+
+func TestExtract(t *testing.T) {
+	path, _ := fixture(t)
+	out := filepath.Join(filepath.Dir(path), "sub.pcapng")
+	code, stdout, errs := cli(t, nil, "extract", path, "-o", out, "--conn", "1")
+	if code != exitOK || !strings.Contains(stdout, "of 1 connections") {
+		t.Fatalf("exit %d %s %s", code, errs, stdout)
+	}
+	code, stdout, _ = cli(t, nil, "flows", "--json", out)
+	if code != exitOK || !strings.Contains(stdout, `"modbus_tcp"`) || strings.Contains(stdout, `"10.0.0.3:80"`) {
+		t.Errorf("the sub-trace: %s", stdout)
+	}
+	if code, _, _ := cli(t, nil, "extract", path, "-o", path); code != exitUsage {
+		t.Errorf("output = input: exit %d", code)
+	}
+	if code, _, _ := cli(t, nil, "extract", path); code != exitUsage {
+		t.Errorf("no output: exit %d", code)
 	}
 }

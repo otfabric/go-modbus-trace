@@ -72,6 +72,85 @@ jobs:
           file mbtracectl
           file mbtracectl | grep -q 'statically linked'
 
+  # LA10: trace -> export mbcap -> the pinned mbcapctl verify and modbusctl
+  # replay -> a go-modbus client reads the scripted values. Required here.
+  replay:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - name: Pinned tools
+        run: make tools
+      - name: Replay end to end
+        run: make replay
+
+  # LA13: Wireshark's dissector as an oracle. Advisory: a disagreement is
+  # triaged by hand (TESTING.md section 4) and never fails the run.
+  oracle:
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Install tshark
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tshark
+          tshark --version | head -n1
+      - name: Compare with tshark
+        run: MBTRACE_ORACLE=1 go test -count=1 -run 'TestTsharkOracle|TestExtract' -v ./trace ./export/subtrace
+
+  # LA18: Scan and Analyze throughput on pull requests, the base against the
+  # head on the same runner. Reported, not gating: a slowdown above 20% is a
+  # warning annotation.
+  bench:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - name: Benchmark head
+        run: go test -run '^$' -bench 'Scan|Analyze' -benchtime 20x -count 5 ./trace | tee head.txt
+      - name: Benchmark base
+        run: |
+          git worktree add ../base "${{ github.event.pull_request.base.sha }}"
+          if [ -f ../base/trace/bench_test.go ]; then
+            (cd ../base && go test -run '^$' -bench 'Scan|Analyze' -benchtime 20x -count 5 ./trace) | tee base.txt
+          else
+            echo "the base has no benchmarks" | tee base.txt
+          fi
+      - name: Compare
+        run: |
+          # median ns/op per benchmark (plain POSIX tools: the runner's awk is mawk)
+          med() { grep '^Benchmark' "$1" | awk '{ print $1, $3 }' | sort -k1,1 -k2,2n |
+            awk '{ v[$1, ++n[$1]] = $2 } END { for (b in n) print b, v[b, int((n[b] + 1) / 2)] }' | sort; }
+          med base.txt > base.med
+          med head.txt > head.med
+          echo "| Benchmark | base ns/op | head ns/op | change |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          join -a 2 base.med head.med | while read -r b x y; do
+            if [ -z "$y" ]; then y=$x; x=""; fi
+            if [ -n "$x" ]; then
+              d=$(awk -v a="$x" -v b="$y" 'BEGIN { printf "%+.1f%%", (b - a) * 100 / a }')
+              slow=$(awk -v a="$x" -v b="$y" 'BEGIN { print (b > a * 1.2) ? 1 : 0 }')
+              [ "$slow" = 1 ] && echo "::warning::$b is ${d} slower than the base"
+            else
+              d="new"
+            fi
+            echo "| $b | ${x:--} | $y | $d |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
   # A time-boxed run of every fuzz target on pull requests (TESTING.md
   # section 3); the seed corpora run in every test job.
   fuzz:

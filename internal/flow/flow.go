@@ -88,6 +88,7 @@ func (g GapKind) String() string {
 
 // Chunk is where delivered bytes come from.
 type Chunk struct {
+	Part          uint16 // input file
 	Frame         uint64
 	Offset        int64
 	Iface         uint32
@@ -246,8 +247,8 @@ func (t *Tracker) unlink(c *Conn) {
 	delete(t.conns, c.key)
 }
 
-// Packet feeds one decoded packet.
-func (t *Tracker) Packet(p *pcapio.Packet, s *link.Segment) {
+// Packet feeds one decoded packet and returns the connection it belongs to.
+func (t *Tracker) Packet(p *pcapio.Packet, s *link.Segment) *Conn {
 	k := keyOf(s.Src, s.Dst)
 	c := t.conns[k]
 	syn := s.Flags&link.SYN != 0 && s.Flags&link.ACK == 0
@@ -255,7 +256,7 @@ func (t *Tracker) Packet(p *pcapio.Packet, s *link.Segment) {
 		if !syn {
 			t.Stats.AfterClose++
 			t.touch(c)
-			return
+			return c
 		}
 		t.unlink(c) // a new epoch after FIN or RST
 		c = nil
@@ -267,7 +268,7 @@ func (t *Tracker) Packet(p *pcapio.Packet, s *link.Segment) {
 		case h.hasISN && s.Seq == h.isn:
 			c.Stats.SYNRetrans++
 			t.seen(c, p, d, s)
-			return
+			return c
 		case h.started && dist(s.Seq, h.next) > t.L.EpochWindow:
 			t.end(c, CloseSuper)
 			t.Stats.Superseded++
@@ -282,6 +283,7 @@ func (t *Tracker) Packet(p *pcapio.Packet, s *link.Segment) {
 	d := t.dir(c, s.Src)
 	t.seen(c, p, d, s)
 	t.segment(c, d, p, s)
+	return c
 }
 
 func dist(a, b uint32) uint32 {
@@ -386,7 +388,7 @@ func (t *Tracker) segment(c *Conn, d int, p *pcapio.Packet, s *link.Segment) {
 				h.next = h.firstAck
 			}
 		}
-		ch := Chunk{Frame: p.Frame, Offset: p.Offset, Iface: p.Iface, TimeNS: p.TimeNS, HasTime: p.HasTime, PayOff: int32(s.PayOff)}
+		ch := Chunk{Part: p.Part, Frame: p.Frame, Offset: p.Offset, Iface: p.Iface, TimeNS: p.TimeNS, HasTime: p.HasTime, PayOff: int32(s.PayOff)}
 		if s.PayOff < 0 {
 			ch.PayOff = -1
 		}

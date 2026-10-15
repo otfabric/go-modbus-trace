@@ -1,4 +1,4 @@
-.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets static fuzz soak golden bench build check clean
+.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets static fuzz soak golden bench tools replay build check clean
 
 # Prefer module-local dependency resolution when a sibling go.work exists.
 export GOWORK := off
@@ -32,6 +32,12 @@ FUZZ_TIME ?= 30s
 FUZZ_TARGETS = ./internal/pcapio:FuzzPcapReader ./internal/pcapio:FuzzPcapngReader ./internal/link:FuzzLinkIPTCP \
 	./mbtcp:FuzzFramer ./mbtcp:FuzzDecodeRequest ./mbtcp:FuzzDecodeResponse ./trace:FuzzPipeline
 
+# The tools the replay test runs (TESTING.md section 5), pinned. modbusctl's
+# v3 tags are not Go module versions (its module path has no /v3), so it is
+# pinned by the pseudo-version of its v3.2.0 commit.
+MBCAPCTL_VERSION  = v0.0.2
+MODBUSCTL_VERSION = v0.0.0-20261015074520-c75d3676a93c
+
 # Size of the generated stream in `make soak`, GiB.
 SOAK_GIB ?= 5
 
@@ -60,8 +66,17 @@ fuzz: ## Run every fuzz target for FUZZ_TIME
 soak: ## Stream SOAK_GIB GiB of generated trace through Scan and check that memory stays flat
 	@MBTRACE_SOAK=$(SOAK_GIB) go test -count=1 -run TestSoak -v -timeout 60m ./trace
 
-golden: ## Regenerate docs/COVERAGE.md from the decoder table
+golden: ## Regenerate docs/COVERAGE.md, the generated JSON Schemas and testdata/plant.pcapng
 	@MBTRACE_UPDATE=1 go test -count=1 -run TestCoverageDoc ./mbtcp
+	@MBTRACE_UPDATE=1 go test -count=1 -run TestSchemasUpToDate ./cmd/mbtracectl
+	@MBTRACE_UPDATE=1 go test -count=1 -run TestFixture ./trace
+
+tools: ## Install the pinned mbcapctl and modbusctl into GOBIN
+	@go install github.com/otfabric/go-modbus-capture/cmd/mbcapctl@$(MBCAPCTL_VERSION)
+	@go install github.com/otfabric/modbusctl@$(MODBUSCTL_VERSION)
+
+replay: ## Run the end-to-end replay test; fails when the pinned tools are missing
+	@MBTRACE_REQUIRE_TOOLS=1 go test -count=1 -run 'TestReplayEndToEnd' -v ./export/mbcapexport
 
 bench: ## Run benchmarks
 	@go test -run '^$$' -bench . -benchmem ./...

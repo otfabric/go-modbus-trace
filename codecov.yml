@@ -1,0 +1,12 @@
+# Codecov configuration for go-modbus-trace.
+# CI uploads one whole-module profile (the organisation's go-ci.yml); the
+# module measured 90.6% at v0.1.0 (go test -coverpkg=./... ./...).
+coverage:
+  status:
+    project:
+      default:
+        target: 85%
+        threshold: 1%
+    patch:
+      default:
+        target: 70%
