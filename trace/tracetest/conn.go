@@ -455,3 +455,6 @@ func (c *Conn) Reset(d Dir) {
 	}
 	c.segment(d, c.seq[d], 0x14, nil, segOpts{})
 }
+
+// MustEndpoint parses ip:port and panics on error (for tests).
+func MustEndpoint(s string) netip.AddrPort { return netip.MustParseAddrPort(s) }

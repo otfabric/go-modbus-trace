@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/otfabric/go-modbus-trace/model"
 	"github.com/otfabric/go-modbus-trace/trace/tracetest"
 )
 
@@ -54,7 +55,8 @@ func FuzzPipeline(f *testing.F) {
 			seq[c][d] = s + uint32(n)
 		}
 		_ = b.Close()
-		sum, flows, err := Scan(context.Background(), OpenReader(&buf), ScanOptions{Limits: Limits{MaxConns: 2, BufferPerDir: 512, BufferTotal: 1024, ResyncScan: 128}})
+		raw := buf.Bytes()
+		sum, flows, err := Scan(context.Background(), OpenReader(bytes.NewReader(raw)), ScanOptions{Limits: Limits{MaxConns: 2, BufferPerDir: 512, BufferTotal: 1024, ResyncScan: 128}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -63,6 +65,25 @@ func FuzzPipeline(f *testing.F) {
 		}
 		if uint64(len(flows)) != sum.Connections.Total {
 			t.Fatalf("%d flows, %d connections", len(flows), sum.Connections.Total)
+		}
+		// The full analysis of the same bytes: no panic, consistent events.
+		var opens, closes int
+		_, err = Analyze(context.Background(), OpenReader(bytes.NewReader(raw)), Options{ScanOptions: ScanOptions{Limits: Limits{MaxConns: 2,
+			BufferPerDir: 512, BufferTotal: 1024, ResyncScan: 128}}, MaxOutstanding: 4}, SinkFunc(func(e *model.Event) error {
+			switch e.Kind {
+			case model.KindConnOpen:
+				opens++
+			case model.KindConnClose:
+				closes++
+			case model.KindTxn:
+				if e.Txn.Request == nil && e.Txn.Response == nil {
+					t.Fatal("a transaction without ADUs")
+				}
+			}
+			return nil
+		}))
+		if err != nil || opens != closes || uint64(opens) != sum.Connections.Total {
+			t.Fatalf("err %v, %d opens, %d closes, %d connections", err, opens, closes, sum.Connections.Total)
 		}
 	})
 }
