@@ -1,5 +1,31 @@
 # go-modbus-trace Releases
 
+## v0.1.1
+
+**Date:** 2026-10-29
+**Previous release:** v0.1.0
+
+### Summary
+
+Dependency update: go-modbus v1.7.2 with go-serial v0.1.8. No API changes.
+
+### Dependencies
+
+- **go-modbus v1.7.1 → v1.7.2.**
+- **go-serial v0.1.6 → v0.1.8**, which fixes two POSIX serial I/O bugs:
+  - `Write` no longer loses data when the tty output buffer is full. It
+    used to return a short count with a nil error (or `n == -1` with
+    `EAGAIN`); it now blocks until every byte is written.
+  - `Read` works when the port's file descriptor is 1024 or higher. It
+    used to return a spurious `io.EOF` at once.
+
+### Other
+
+- The `spike/` prototype directory is removed; security contact is
+  security@otfabric.io.
+
+---
+
 ## v0.1.0
 
 **Date:** 2026-10-15
