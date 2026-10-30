@@ -66,7 +66,7 @@ internal/pcapio/    pcap and pcapng readers (gzip, stream), pcapng writer, packe
 internal/link/      link layers, VLAN, IPv4/IPv6, TCP header parsing, IP fragment reassembly
 internal/flow/      connection tracking, epochs, per-direction TCP reassembly
 internal/pair/      request/response correlation
-cmd/mbtracectl/     the CLI
+cmd/mbtracectl/     the CLI (a nested module, ADR-0009 of otfabric/engineering)
 docs/               the four documents above, schema/ (JSON Schemas), COVERAGE.md, REPLAY-WORKFLOW.md
 testdata/           small traces + golden event files (README.md lists origins)
 ```

@@ -31,6 +31,17 @@ jobs:
       go-versions: '["1.23", "1.24", "1.25", "1.26", "1.27"]'
     secrets: inherit
 
+  # The CLI is a nested module (ADR-0009).
+  cli:
+    uses: otfabric/.github/.github/workflows/go-ci.yml@v2.1.0
+    with:
+      module-dir: cmd/mbtracectl
+      coverage-min: "85"
+      test-exclude-regex: "/example(s)?($|/)"
+      run-codecov: false
+      go-versions: '["1.23", "1.24", "1.25", "1.26", "1.27"]'
+    secrets: inherit
+
   # Every target of REQUIREMENTS.md "Programs" builds and tests with
   # CGO_ENABLED=0 on a runner of its own architecture. Nothing is emulated (no
   # QEMU): linux/arm (v7) has no hosted runner, so it is cross-compiled on the
@@ -68,14 +79,18 @@ jobs:
       - name: No replace directives
         run: make mod-check
       - name: Build
-        run: go build ./...
+        run: |
+          go build ./...
+          (cd cmd/mbtracectl && go build -o "$RUNNER_TEMP/" ./...)
       - name: Test
         if: matrix.test
-        run: go test -count=1 ./...
+        run: |
+          go test -count=1 ./...
+          (cd cmd/mbtracectl && go test -count=1 ./...)
       - name: Static binary
         if: matrix.os == 'linux'
         run: |
-          go build -trimpath -o mbtracectl ./cmd/mbtracectl
+          (cd cmd/mbtracectl && go build -trimpath -o ../../mbtracectl .)
           file mbtracectl
           file mbtracectl | grep -q 'statically linked'
 
