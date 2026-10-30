@@ -16,6 +16,10 @@
 /fuzz/
 profile
 
+# Local multi-module development (never committed; CI fails on replace)
+go.work
+go.work.sum
+
 # Traces written by the L0 spike or by hand: fixtures live in testdata/ only
 *.pcap
 *.pcapng

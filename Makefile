@@ -9,11 +9,9 @@ help: ## Show targets and descriptions
 .DEFAULT_GOAL := help
 
 APP_NAME   = mbtracectl
-CMD_PKG    = ./cmd/mbtracectl
-# The CLI is a nested module (ADR-0009): ./... of this module does not reach it,
-# and building it from the repository root needs the workspace in go.work.
+# The CLI is a nested module (ADR-0009): ./... of this module does not reach it.
 CLI_DIR    = cmd/mbtracectl
-GO_CLI     = GOWORK=$(CURDIR)/go.work go
+GO_CLI     = go -C $(CLI_DIR)
 BIN_DIR    = bin
 BINARY     = $(BIN_DIR)/$(APP_NAME)
 
@@ -126,14 +124,14 @@ targets: ## Cross-build every package for every target with CGO_ENABLED=0
 static: ## Build mbtracectl for the Linux gateways and check that it is statically linked
 	@mkdir -p $(BIN_DIR)
 	@for a in amd64 arm64 arm; do \
-		GOOS=linux GOARCH=$$a GOARM=7 CGO_ENABLED=0 $(GO_CLI) build -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(APP_NAME)-linux-$$a $(CMD_PKG) || exit 1; \
+		GOOS=linux GOARCH=$$a GOARM=7 CGO_ENABLED=0 $(GO_CLI) build -trimpath $(LDFLAGS) -o "$(CURDIR)/$(BIN_DIR)/$(APP_NAME)-linux-$$a" . || exit 1; \
 		file $(BIN_DIR)/$(APP_NAME)-linux-$$a | grep -q 'statically linked' || { file $(BIN_DIR)/$(APP_NAME)-linux-$$a; exit 1; }; \
 		echo "$(APP_NAME)-linux-$$a: static"; \
 	done
 
 build: ## Build $(BINARY) (static)
 	@mkdir -p $(BIN_DIR)
-	@CGO_ENABLED=0 $(GO_CLI) build $(LDFLAGS) -o $(BINARY) $(CMD_PKG)
+	@CGO_ENABLED=0 $(GO_CLI) build $(LDFLAGS) -o "$(CURDIR)/$(BINARY)" .
 
 clean: ## Remove bin/ and coverage.out
 	@rm -rf $(BIN_DIR) coverage.out
