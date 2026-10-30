@@ -13,8 +13,9 @@ import (
 
 // recorder is a Handler that records events as text.
 type recorder struct {
-	events []string
-	data   map[string][]byte
+	events  []string
+	data    map[string][]byte
+	repeats []string
 }
 
 func (r *recorder) Open(c *Conn) {
@@ -29,6 +30,9 @@ func (r *recorder) Data(c *Conn, d int, pos uint64, b []byte, ch Chunk) {
 		r.events = append(r.events, fmt.Sprintf("BAD POS %s %d %d", k, pos, len(r.data[k])))
 	}
 	r.data[k] = append(r.data[k], b...)
+}
+func (r *recorder) Repeat(c *Conn, d int, pos, end uint64) {
+	r.repeats = append(r.repeats, fmt.Sprintf("%d/%d %d-%d", c.ID, d, pos, end))
 }
 func (r *recorder) Gap(c *Conn, d int, pos uint64, n int64, kind GapKind) {
 	k := fmt.Sprintf("%d/%d", c.ID, d)
@@ -186,5 +190,56 @@ func TestHostileHolding(t *testing.T) {
 func TestNamesOutOfRange(t *testing.T) {
 	if Close(200).String() != "unknown" || GapKind(200).String() != "unknown" || CloseFIN.String() != "fin" || GapLoss.String() != "loss" {
 		t.Errorf("%q %q", Close(200), GapKind(200))
+	}
+}
+
+func TestRepeat(t *testing.T) {
+	cases := []struct {
+		name    string
+		ps      []pkt
+		want    string
+		retrans uint64
+	}{
+		{"whole segment", []pkt{
+			{cl, sv, 100, 0, link.ACK, "abcd"},
+			{cl, sv, 104, 0, link.ACK, "efgh"},
+			{cl, sv, 100, 0, link.ACK, "abcd"},
+		}, "[1/0 0-4]", 1},
+		{"old part of a partly new segment", []pkt{
+			{cl, sv, 100, 0, link.ACK, "abcd"},
+			{cl, sv, 102, 0, link.ACK, "cdef"},
+		}, "[1/0 2-4]", 1},
+		{"a keepalive probe is not one", []pkt{
+			{cl, sv, 100, 0, link.ACK, "abcd"},
+			{cl, sv, 103, 0, link.ACK, "d"},
+		}, "[]", 0},
+		{"a held copy looking like a probe is one", []pkt{
+			{cl, sv, 100, 0, link.ACK, "ab"},
+			{cl, sv, 103, 0, link.ACK, "d"},
+			{cl, sv, 102, 0, link.ACK, "cd"},
+		}, "[1/0 3-4]", 1},
+		{"clipped to the start of the stream", []pkt{
+			{cl, sv, 100, 0, link.ACK, "abcd"},
+			{cl, sv, 98, 0, link.ACK, "xxab"},
+		}, "[1/0 0-2]", 1},
+		{"wholly before the start of the stream", []pkt{
+			{cl, sv, 100, 0, link.ACK, "abcd"},
+			{cl, sv, 90, 0, link.ACK, "xxxx"},
+		}, "[]", 1},
+		{"across the sequence number wrap", []pkt{
+			{cl, sv, 0xFFFFFFFE, 0, link.ACK, "abcd"},
+			{cl, sv, 0xFFFFFFFF, 0, link.ACK, "bc"},
+		}, "[1/0 1-3]", 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &recorder{}
+			tr := NewTracker(Limits{}, r)
+			feed(tr, c.ps...)
+			tr.Finish()
+			if got := fmt.Sprint(r.repeats); got != c.want || tr.Stats.Retransmits != c.retrans {
+				t.Errorf("repeats %s, want %s; retransmits %d, want %d", got, c.want, tr.Stats.Retransmits, c.retrans)
+			}
+		})
 	}
 }

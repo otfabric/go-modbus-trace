@@ -117,7 +117,7 @@ type ConnCounters struct {
 
 // Quality counts TCP and framing conditions over the trace.
 type Quality struct {
-	Retransmitted      uint64 `json:"retransmitted"`       // segments already delivered, seen again
+	Retransmitted      uint64 `json:"retransmitted"`       // segments already delivered, seen again; not transactions, see model.FlagRetransmitted
 	OutOfOrder         uint64 `json:"out_of_order"`        // segments held until the bytes before them came
 	OverlapConflicts   uint64 `json:"overlap_conflict"`    // retransmissions whose bytes differ (the first data wins)
 	Keepalives         uint64 `json:"keepalives"`          // one-byte probes before the next expected byte

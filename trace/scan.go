@@ -348,6 +348,13 @@ func (sc *scanner) Data(c *flow.Conn, d int, pos uint64, b []byte, ch flow.Chunk
 	cs.fr[d].Write(pos, b)
 }
 
+// Repeat implements flow.Handler.
+func (sc *scanner) Repeat(c *flow.Conn, d int, pos, end uint64) {
+	if cs := c.User.(*connState); cs.a != nil {
+		cs.a.repeat(d, pos, end)
+	}
+}
+
 // Gap implements flow.Handler.
 func (sc *scanner) Gap(c *flow.Conn, d int, pos uint64, n int64, kind flow.GapKind) {
 	cs := c.User.(*connState)

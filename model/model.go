@@ -125,6 +125,17 @@ const (
 
 // Quality flags.
 const (
+	// FlagRetransmitted marks a transaction when bytes of its request or
+	// response were seen again, as a retransmission or as a duplicate
+	// observation of the packet, before the transaction was emitted. It is
+	// set when a packet that carried new bytes also repeated old ones, and
+	// when a whole segment was sent again in time: a copy of a request before
+	// its response, or of the first segments of an ADU still being framed.
+	//
+	// Events are not amended, so a later copy marks nothing: a copy of a
+	// complete response or of an answered request only counts in
+	// Quality.Retransmitted. That counter counts segments, this flag marks
+	// transactions: the two do not line up.
 	FlagRetransmitted = "retransmitted"
 	FlagOutOfOrder    = "out_of_order"
 	FlagGapAdjacent   = "gap_adjacent"

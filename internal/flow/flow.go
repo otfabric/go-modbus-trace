@@ -9,8 +9,9 @@
 // reports every hole as a gap with the number of missing bytes when the
 // sequence numbers give it. Retransmissions and duplicate observations of a
 // packet (capture on "any", two taps) fall out as old data and are counted,
-// so no byte is delivered twice. The first data wins an overlap; a
-// conflicting overlap is counted. Checksums are never checked.
+// so no byte is delivered twice, and the Handler is told which stream range
+// was seen again. The first data wins an overlap; a conflicting overlap is
+// counted. Checksums are never checked.
 package flow
 
 import (
@@ -106,15 +107,18 @@ type Chunk struct {
 	TimeNS        int64
 	HasTime       bool
 	PayOff        int32 // offset of the bytes in the packet's data; -1 after IP reassembly
-	Retransmitted bool  // the packet also carried bytes already delivered
+	Retransmitted bool  // the packet also carried bytes already delivered (Handler.Repeat reports which)
 	OutOfOrder    bool  // held until an earlier hole was filled
 }
 
 // Handler receives a connection's events. Data's bytes are valid only
-// during the call.
+// during the call. Repeat says that a segment carried the already delivered
+// stream range [pos, end) again (never for a keepalive probe); the range is
+// clipped to the start of the stream.
 type Handler interface {
 	Open(c *Conn)
 	Data(c *Conn, dir int, pos uint64, b []byte, ch Chunk)
+	Repeat(c *Conn, dir int, pos, end uint64)
 	Gap(c *Conn, dir int, pos uint64, n int64, kind GapKind)
 	Close(c *Conn)
 }
@@ -434,9 +438,11 @@ func (t *Tracker) accept(c *Conn, d int, seq uint32, b []byte, missing uint32, c
 		}
 		c.Stats.Retransmits++
 		t.compare(c, h, seq, b)
+		t.repeat(c, d, seq, end)
 		return
 	case seqLT(seq, h.next): // partly new
 		c.Stats.Retransmits++
+		t.repeat(c, d, seq, h.next)
 		cut := h.next - seq
 		if int(cut) >= len(b) {
 			t.compare(c, h, seq, b)
@@ -463,6 +469,22 @@ func (t *Tracker) accept(c *Conn, d int, seq uint32, b []byte, missing uint32, c
 	}
 	if !held {
 		t.drain(c, d, true) // a held segment is delivered by drain's own loop: no recursion per segment
+	}
+}
+
+// repeat reports the bytes [seq, end), all before next, as seen again.
+func (t *Tracker) repeat(c *Conn, d int, seq, end uint32) {
+	h := &c.dirs[d]
+	back, rest := uint64(h.next-seq), uint64(h.next-end)
+	if rest >= h.pos {
+		return // before the first byte of the stream
+	}
+	var pos uint64
+	if back < h.pos {
+		pos = h.pos - back
+	}
+	if to := h.pos - rest; pos < to {
+		t.H.Repeat(c, d, pos, to)
 	}
 }
 

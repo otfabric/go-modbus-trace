@@ -1,5 +1,34 @@
 # go-modbus-trace Releases
 
+## v0.4.0
+
+**Date:** 2026-10-30
+**Previous release:** v0.3.0
+
+### Fixed
+
+- **A whole segment sent again now marks its transaction.** `model.FlagRetransmitted`
+  used to be set only when a retransmitted segment also carried new bytes, so a
+  whole Modbus message sent again was counted and marked nothing.
+  - A copy of a request before its response, or of the first segments of an ADU
+    still being framed, now sets the flag. So does the old part of a partly new
+    segment, on the earlier ADU it repeats.
+  - A copy of a complete response or of an answered request still only counts:
+    its transaction is already emitted and events are not amended.
+  - `Quality.Retransmitted` does not change. It counts segments, the flag marks
+    transactions, and the two are not expected to line up.
+  - A trace with every packet captured twice (capture on `any`, two taps) now has
+    the flag on its requests, because the second copy arrives before the response.
+    `retransmitted` in the MBCAP export report rises with it; no transaction is
+    excluded because of the flag.
+
+### Added
+
+- `tracetest.Conn.Resend` sends the direction's last write again, for scripting
+  a copy that arrives late.
+
+---
+
 ## v0.3.0
 
 **Date:** 2026-10-30
