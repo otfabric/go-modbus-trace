@@ -93,8 +93,8 @@ See the layout in `AGENTS.md`. Dependency policy:
 | Situation | Action |
 |---|---|
 | `s == next` | deliver, `next += n`, then drain buffered segments that now fit |
-| `s + n <= next` | whole segment already delivered: `retransmitted` (count, compare bytes with what was delivered if still known: a mismatch is a flagged `overlap_conflict`) |
-| `s < next < s + n` | partially new: deliver the new tail, flag `retransmitted` |
+| `s + n <= next` | whole segment already delivered: count it as `retransmitted`, compare bytes with what was delivered if still known (a mismatch is an `overlap_conflict`), and report the stream range so the analysis can mark the ADUs it overlaps (below) |
+| `s < next < s + n` | partially new: count as above, report the old part's range, deliver the new tail and flag its ADU `retransmitted` |
 | `s > next` | buffer (bounded per direction and in total; each held segment is charged its bytes plus 128, so empty or one-byte segments cannot fill the buffer for free, and a long run of held segments drains in a loop, never one stack frame per segment); `out_of_order` if the hole before it is later filled by data (not when it is skipped as a gap). Among held segments with the same start, the first one captured is delivered first (first data wins) |
 | buffer full, FIN/RST, end of trace, or the new epoch starts | declare a **gap** of `s - next` bytes (when known) and continue at `s`; `gap_adjacent` on transactions touching it |
 | the peer acknowledged beyond `next` (ACK > `next`) | those bytes reached the peer but not the capture and will never be retransmitted. The gap is declared as soon as data waits behind it: when such an ACK arrives while segments are held, or when a later segment of the direction arrives. Without data behind it nothing is declared yet, so a reordered capture (an ACK copy stamped before its data on another interface) loses nothing. Declared up to the ACK (or to the first held segment), what fits is delivered (`DECISIONS.md` D2, Q4) |
@@ -105,6 +105,8 @@ See the layout in `AGENTS.md`. Dependency policy:
 Delivered bytes go to the framer with their stream position and the packet that carried them (frame, file offset, interface, time, payload offset; `-1` after IP reassembly), so an ADU knows exactly which packets carried it . FIN in both directions closes the connection (`fin`), RST closes it at once (`rst`); buffers are flushed as gaps first. The end of the trace closes everything (`close=end_of_trace`) in connection order. Gap counting: a gap that continues the previous one with nothing delivered in between (a hole declared in two steps) counts once in `gaps`; `gap_bytes` adds up.
 
 **Duplicate observations** (capture on `any`, a bridge and its member, two taps): the second copy of every segment arrives with `s + n <= next` and is dropped as a retransmission. Consequently no transaction is duplicated. Their frames are kept in provenance only when they carried bytes that were delivered.
+
+**Which transactions a copy marks.** Events go out in order of determination and are never amended, so a copy can only mark a transaction that is not emitted yet. The analysis keeps the framed ADUs of unemitted transactions per direction (bounded by `MaxOutstanding` and the ADUs held while the roles are undecided). The flag `retransmitted` goes on every such ADU a copy overlaps, and on an ADU still being framed when the copy repeats its first segments. So a copy of a request before its response marks the transaction. A copy of a complete response, or of a request already answered, comes after the emission (a transaction is emitted when its response is framed): it is counted and marks nothing, neither its own transaction nor a later one. Holding transactions back to wait for a copy that may never come would delay every event for the rare case. The flag and the counter therefore do not line up: the counter counts segments, including late copies and duplicate observations, and one transaction may take several copies or none. A duplicate observation of a request marks it like any other copy, so on a trace with every packet captured twice all requests that are not late carry the flag.
 
 ## 7. Framing, resync, roles (`mbtcp`)
 
@@ -202,7 +204,7 @@ type Transaction struct {
 type Event struct { Kind string; Time time.Time; Conn *Connection; Txn *Transaction; Gap *Gap; Note *Note } // exactly one payload
 ```
 
-**Quality flags** (each has a counter in the file summary and a documented meaning): `retransmitted`, `out_of_order`, `gap_adjacent`, `resynced`, `snaplen_truncated`, `midstream`, `role_guessed`, `retried`, `clock_order`, `slow`, `invalid_pdu`, `serial_function_over_tcp`, `unknown_function`, `broadcast`, `foreign_protocol`, `role_unknown` (the roles stayed undecided). Not transaction flags: `overlap_conflict` (a file-summary counter; the transaction is `retransmitted`) and `internal_error` (a note).
+**Quality flags** (each has a counter in the file summary and a documented meaning): `retransmitted`, `out_of_order`, `gap_adjacent`, `resynced`, `snaplen_truncated`, `midstream`, `role_guessed`, `retried`, `clock_order`, `slow`, `invalid_pdu`, `serial_function_over_tcp`, `unknown_function`, `broadcast`, `foreign_protocol`, `role_unknown` (the roles stayed undecided). Not transaction flags: `overlap_conflict` (a file-summary counter; the transaction is `retransmitted` when the copy came in time, section 6) and `internal_error` (a note).
 
 **Time.** Everything is the capture timestamp (UTC, ns). Files may be out of time order (merged captures, `-i any`): the pipeline processes in file order and never sorts; consumers sort. Negative gaps are flagged. The library never calls `time.Now`.
 

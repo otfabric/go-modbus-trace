@@ -477,3 +477,133 @@ func TestPanicRecovered(t *testing.T) {
 		t.Errorf("%d transactions, %d internal errors %+v", n, sum.InternalErrorCount, sum.InternalErrors)
 	}
 }
+
+// TestRetransmittedFlag covers which transactions a copy of a segment marks:
+// those not emitted yet, and no others.
+func TestRetransmittedFlag(t *testing.T) {
+	const flag = model.FlagRetransmitted
+	req := tracetest.Frame{TID: 1, Unit: 1, PDU: rd3}
+	cases := []struct {
+		name    string
+		conn    tracetest.ConnOptions
+		script  func(c *tracetest.Conn)
+		want    string // one transaction per line
+		reqFlag bool   // the first transaction's request ADU has the flag
+		resFlag bool   // ... its response ADU
+		copies  uint64 // Quality.Retransmitted
+	}{
+		{name: "request copied before the response", script: func(c *tracetest.Conn) {
+			c.Write(tracetest.ToServer, tracetest.WriteOpts{Retransmit: []int{0}}, req)
+			c.Response(1, 1, resp3(1))
+			c.Request(2, 1, rd3)
+			c.Response(2, 1, resp3(2))
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001 [retransmitted]\nc1 u1 tid2 fc3 ok resp=03020002", reqFlag: true, copies: 1},
+		{name: "a copy marks only the request it repeats", script: func(c *tracetest.Conn) {
+			c.Write(tracetest.ToServer, tracetest.WriteOpts{Seg: []int{12}, Retransmit: []int{1}},
+				req, tracetest.Frame{TID: 2, Unit: 1, PDU: rd3})
+			c.Response(1, 1, resp3(1))
+			c.Response(2, 1, resp3(2))
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001\nc1 u1 tid2 fc3 ok resp=03020002 [retransmitted]", copies: 1},
+		{name: "two copies of one request", script: func(c *tracetest.Conn) {
+			c.Write(tracetest.ToServer, tracetest.WriteOpts{Retransmit: []int{0}}, req)
+			c.Resend(tracetest.ToServer)
+			c.Response(1, 1, resp3(1))
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001 [retransmitted]", reqFlag: true, copies: 2},
+		{name: "a request never answered", script: func(c *tracetest.Conn) {
+			c.Write(tracetest.ToServer, tracetest.WriteOpts{Retransmit: []int{0}}, req)
+		}, want: "c1 u1 tid1 fc3 unanswered [retransmitted]", reqFlag: true, copies: 1},
+		{name: "response copied: late, counted only", script: func(c *tracetest.Conn) {
+			c.Request(1, 1, rd3)
+			c.Write(tracetest.ToClient, tracetest.WriteOpts{Retransmit: []int{0}}, tracetest.Frame{TID: 1, Unit: 1, PDU: resp3(1)})
+			c.Request(2, 1, rd3)
+			c.Response(2, 1, resp3(2))
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001\nc1 u1 tid2 fc3 ok resp=03020002", copies: 1},
+		{name: "answered request copied: late, counted only", script: func(c *tracetest.Conn) {
+			c.Request(1, 1, rd3)
+			c.Response(1, 1, resp3(1))
+			c.Resend(tracetest.ToServer)
+			c.Request(2, 1, rd3)
+			c.Response(2, 1, resp3(2))
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001\nc1 u1 tid2 fc3 ok resp=03020002", copies: 1},
+		{name: "a late copy over two requests marks the open one", script: func(c *tracetest.Conn) {
+			c.Write(tracetest.ToServer, tracetest.WriteOpts{}, req, tracetest.Frame{TID: 2, Unit: 1, PDU: rd3})
+			c.Response(1, 1, resp3(1))
+			c.Resend(tracetest.ToServer)
+			c.Response(2, 1, resp3(2))
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001\nc1 u1 tid2 fc3 ok resp=03020002 [retransmitted]", copies: 1},
+		{name: "first segment of a request copied before it is framed", script: func(c *tracetest.Conn) {
+			b := tracetest.MBAP(1, 1, rd3)
+			c.Write(tracetest.ToServer, tracetest.WriteOpts{Retransmit: []int{0}}, tracetest.Frame{Raw: b[:5]})
+			c.Write(tracetest.ToServer, tracetest.WriteOpts{}, tracetest.Frame{Raw: b[5:]})
+			c.Response(1, 1, resp3(1))
+			c.Request(2, 1, rd3)
+			c.Response(2, 1, resp3(2))
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001 [retransmitted]\nc1 u1 tid2 fc3 ok resp=03020002", reqFlag: true, copies: 1},
+		{name: "first segment of a response copied before it is framed", script: func(c *tracetest.Conn) {
+			b := tracetest.MBAP(1, 1, resp3(1))
+			c.Request(1, 1, rd3)
+			c.Write(tracetest.ToClient, tracetest.WriteOpts{Retransmit: []int{0}}, tracetest.Frame{Raw: b[:5]})
+			c.Write(tracetest.ToClient, tracetest.WriteOpts{}, tracetest.Frame{Raw: b[5:]})
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001 [retransmitted]", resFlag: true, copies: 1},
+		{name: "response copied while the roles are undecided", conn: tracetest.ConnOptions{Midstream: true, Server: tracetest.MustEndpoint("10.0.0.2:1502")}, script: func(c *tracetest.Conn) {
+			c.Request(1, 1, rd3)
+			c.Write(tracetest.ToClient, tracetest.WriteOpts{Retransmit: []int{0}}, tracetest.Frame{TID: 1, Unit: 1, PDU: resp3(1)})
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001 [retransmitted,midstream,role_guessed]", resFlag: true, copies: 1},
+		{name: "a keepalive probe marks nothing", script: func(c *tracetest.Conn) {
+			c.Request(1, 1, rd3)
+			c.Keepalive(tracetest.ToServer)
+			c.Response(1, 1, resp3(1))
+		}, want: "c1 u1 tid1 fc3 ok resp=03020001"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			b, err := tracetest.New(&buf, tracetest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.script(b.Conn(tc.conn))
+			if err := b.Close(); err != nil {
+				t.Fatal(err)
+			}
+			// What the sink saw when it got an event is what it keeps.
+			var evs []*model.Event
+			var seen []string
+			sum, err := Analyze(context.Background(), OpenReader(bytes.NewReader(buf.Bytes())), Options{}, SinkFunc(func(e *model.Event) error {
+				j, err := json.Marshal(e)
+				evs, seen = append(evs, e), append(seen, string(j))
+				return err
+			}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for i, e := range evs {
+				if j, _ := json.Marshal(e); string(j) != seen[i] {
+					t.Errorf("event %d changed after it was emitted:\n%s\n%s", i, seen[i], j)
+				}
+			}
+			ts := txns(evs)
+			if got := lines(ts); got != tc.want {
+				t.Fatalf("transactions:\n%s\nwant:\n%s", got, tc.want)
+			}
+			if got := sum.Quality.Retransmitted; got != tc.copies || got != b.Truth().Retransmits {
+				t.Errorf("Quality.Retransmitted = %d, want %d (builder %d)", got, tc.copies, b.Truth().Retransmits)
+			}
+			if tc.reqFlag != slices.Contains(ts[0].Request.Flags, flag) {
+				t.Errorf("request flags %v, want the flag: %v", ts[0].Request.Flags, tc.reqFlag)
+			}
+			if tc.resFlag != (ts[0].Response != nil && slices.Contains(ts[0].Response.Flags, flag)) {
+				t.Errorf("response flags %v, want the flag: %v", ts[0].Response.Flags, tc.resFlag)
+			}
+			var marked uint64
+			for _, x := range ts {
+				if slices.Contains(x.Flags, flag) {
+					marked++
+				}
+			}
+			if sum.TransactionFlags[flag] != marked {
+				t.Errorf("TransactionFlags = %d, marked %d", sum.TransactionFlags[flag], marked)
+			}
+		})
+	}
+}

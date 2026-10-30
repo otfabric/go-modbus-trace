@@ -120,7 +120,8 @@ type Conn struct {
 	// peer acknowledged past it and later data waits behind it) until both
 	// happened.
 	holeOpen, peerAcked, dataAfter [2]bool
-	resync                         [2]bool // the next delivered ADU follows a gap
+	resync                         [2]bool   // the next delivered ADU follows a gap
+	last                           [2]string // the direction's last write, for Resend
 	closed                         bool
 }
 
@@ -246,6 +247,15 @@ func has(xs []int, i int) bool {
 	return false
 }
 
+// Resend sends the direction's last Write again as one identical segment,
+// at this point of the trace, which WriteOpts.Retransmit cannot do. The write
+// must have been captured whole and be longer than one byte (see Keepalive).
+func (c *Conn) Resend(d Dir) {
+	data := []byte(c.last[d])
+	c.segment(d, c.seq[d]-uint32(len(data)), 0x18, data, segOpts{})
+	c.b.truth.Retransmits++
+}
+
 // Write sends frames back to back as one write in direction d.
 func (c *Conn) Write(d Dir, o WriteOpts, frames ...Frame) {
 	var data []byte
@@ -365,6 +375,7 @@ func (c *Conn) Write(d Dir, o WriteOpts, frames ...Frame) {
 		}
 	}
 	c.seq[d] += uint32(len(data))
+	c.last[d] = string(data)
 	// Fates of the ADUs.
 	for _, sp := range spans {
 		lost, cut, allCut := false, false, true
