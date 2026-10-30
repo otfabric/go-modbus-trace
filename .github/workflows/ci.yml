@@ -18,8 +18,15 @@ permissions:
 jobs:
   # Organisation checks: format, lint, vet, vulnerabilities, race tests, coverage.
   ci:
-    uses: otfabric/.github/.github/workflows/go-ci.yml@v2
+    uses: otfabric/.github/.github/workflows/go-ci.yml@v2.1.0
     with:
+      run-govulncheck: true
+      coverage-min: "90"
+      # The CLI's tests exercise the library, and codecov.yml measures the same way.
+      coverpkg: "./..."
+      # TESTING.md section 3: 30 s per target.
+      fuzz-time: 30s
+      test-exclude-regex: "/example(s)?($|/)"
       codecov-name: go-modbus-trace
       go-versions: '["1.23", "1.24", "1.25", "1.26", "1.27"]'
     secrets: inherit
@@ -178,16 +185,3 @@ jobs:
           go-version-file: go.mod
           check-latest: true
       - run: make soak SOAK_GIB=2
-
-  # A time-boxed run of every fuzz target on pull requests (TESTING.md
-  # section 3); the seed corpora run in every test job.
-  fuzz:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-          check-latest: true
-      - run: make fuzz FUZZ_TIME=30s
