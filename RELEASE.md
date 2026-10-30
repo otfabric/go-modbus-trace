@@ -1,5 +1,19 @@
 # go-modbus-trace Releases
 
+## Unreleased
+
+### Changed
+
+- **`cmd/mbtracectl` is now a nested module** (`github.com/otfabric/go-modbus-trace/cmd/mbtracectl`).
+  The library's `go.mod` no longer requires cobra or pflag, so consumers stop
+  inheriting them. Library import paths and the exported API are unchanged.
+  - Release binaries are published as before.
+  - Build from a checkout with `make build`, or `cd cmd/mbtracectl && go build .`.
+  - `go install .../cmd/mbtracectl@<version>` works up to v0.1.1 and not after
+    it, while the nested module's `replace` is in place.
+
+---
+
 ## v0.1.1
 
 **Date:** 2026-10-29
