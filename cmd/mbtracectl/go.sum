@@ -7,6 +7,8 @@ github.com/otfabric/go-modbus v1.10.0 h1:AXbAoz/Fy1jp2JIWQhy1L/U2ZwwdnQ7pucyoRxY
 github.com/otfabric/go-modbus v1.10.0/go.mod h1:iM4a/kO8gN0L2uTXL1k575W0rwMBTsSwQ04Ko02QdOQ=
 github.com/otfabric/go-modbus-capture v0.0.2 h1:Y/3hRz2+oQVuAHV3SYbeQ2aCAt2WtUZjHsb+2DlAFj0=
 github.com/otfabric/go-modbus-capture v0.0.2/go.mod h1:0EjVYP0QdiwAnU50MeG7o6IBVvdcy87uHPYFET1HlgE=
+github.com/otfabric/go-modbus-trace v0.2.0 h1:bdjdfWS4kYIjlWdkfMJiwhaGYIZesuqqMVHUP59CYEw=
+github.com/otfabric/go-modbus-trace v0.2.0/go.mod h1:iaJ6mZY7lXdUbeaNf+yIpRy9YCHEM3jl4WFpcEwz0EQ=
 github.com/otfabric/go-serial v0.1.8 h1:o/Pv8kJ7ZLIys5vFmB1Ng+KpppgcEPWkPHK5xzlvxEk=
 github.com/otfabric/go-serial v0.1.8/go.mod h1:TqbYpWWg6W+IuCLs8YM2cndlMAEaTyaKyUX6Z08gtq8=
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
