@@ -1,4 +1,4 @@
-.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets static fuzz soak golden bench tools replay build check clean
+.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets static fuzz soak golden bench tools replay build check clean coverage-check cross e2e interop
 
 # Prefer module-local dependency resolution when a sibling go.work exists.
 export GOWORK := off
@@ -30,6 +30,8 @@ GOFMT_CI = $(shell GOTOOLCHAIN=go$(GO_MOD_VERSION).0 go env GOROOT)/bin/gofmt
 TARGETS = linux/amd64 linux/arm64 linux/arm darwin/arm64 darwin/amd64 windows/amd64 windows/arm64
 
 # Fuzz targets and the time each gets in `make fuzz`.
+# Same minimum as coverage-min in ci.yml.
+COVER_MIN := 90
 FUZZ_TIME ?= 30s
 FUZZ_TARGETS = ./internal/pcapio:FuzzPcapReader ./internal/pcapio:FuzzPcapngReader ./internal/link:FuzzLinkIPTCP \
 	./mbtcp:FuzzFramer ./mbtcp:FuzzDecodeRequest ./mbtcp:FuzzDecodeResponse ./trace:FuzzPipeline
@@ -45,6 +47,18 @@ SOAK_GIB ?= 5
 
 all: check build ## Run checks and build bin/mbtracectl
 
+coverage-check: coverage ## Fail when total coverage is below COVER_MIN
+	@total=$$(go tool cover -func=coverage.out | awk '/^total:/ {sub("%","",$$3); print $$3}'); \
+	awk -v t="$$total" -v m="$(COVER_MIN)" 'BEGIN { if (t+0 < m+0) { printf "coverage %.1f%% < %s%%\n", t, m; exit 1 } else printf "coverage %.1f%% >= %s%%\n", t, m }'
+
+cross: targets ## Alias of targets (GO-007 canonical name)
+
+e2e: replay ## Alias of replay: mbtracectl output through the pinned mbcapctl and modbusctl (make tools)
+
+interop: ## Compare the decoder with Wireshark's dissector (tshark on PATH; advisory, never a conformance claim)
+	@command -v tshark >/dev/null || { echo "tshark is not installed"; exit 1; }
+	@MBTRACE_ORACLE=1 go test -count=1 -run 'TestTsharkOracle|TestExtract' -v ./trace ./export/subtrace
+
 check: fmt fmt-check mod-check lint lint-ci vet vuln test targets ## Format, lint, vet, vuln, test and cross-build
 
 test: ## Run unit tests (race detector)
@@ -52,9 +66,9 @@ test: ## Run unit tests (race detector)
 	@go test -count=1 -race ./...
 	@cd $(CLI_DIR) && go test -count=1 -race ./...
 
-coverage: ## Write coverage.out (atomic mode)
+coverage: ## Write coverage.out (atomic mode; -coverpkg=./... as in ci.yml)
 	@echo "Running tests with coverage"
-	@go test -count=1 -race -coverprofile=coverage.out -covermode=atomic ./...
+	@go test -count=1 -race -coverpkg=./... -coverprofile=coverage.out -covermode=atomic ./...
 
 cover: coverage ## Open HTML coverage report
 	@go tool cover -html=coverage.out
