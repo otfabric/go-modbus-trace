@@ -4,6 +4,7 @@ package trace
 
 import (
 	"context"
+	"slices"
 	"time"
 
 	"github.com/otfabric/go-modbus-trace/internal/flow"
@@ -100,7 +101,9 @@ type aconn struct {
 	info    *model.Connection
 	pair    *pair.Pairer
 	chunks  [2][]chunk
-	gapNext [2]bool // the next ADU of the direction follows a gap
+	unsent  [2][]unsent // framed ADUs whose transaction is not emitted yet
+	copyEnd [2]uint64   // end of the furthest stream range seen again
+	gapNext [2]bool     // the next ADU of the direction follows a gap
 	queue   []queued
 	queued  [2]int
 	samples [2][]mbtcp.Sample
@@ -111,6 +114,13 @@ type chunk struct {
 	pos uint64
 	n   int
 	ch  flow.Chunk
+}
+
+// unsent is a framed ADU that a copy can still mark: it is bounded by the
+// outstanding requests and the ADUs held while the roles are undecided.
+type unsent struct {
+	pos, end uint64
+	adu      *model.ADU
 }
 
 type queued struct {
@@ -209,6 +219,32 @@ func (a *aconn) data(d int, pos uint64, n int, ch flow.Chunk) {
 	a.chunks[d] = cs
 }
 
+// repeat records that the direction's bytes [pos, end) were seen again. It
+// marks the ADUs overlapping them whose transaction is not emitted yet, and
+// through copyEnd the one still being framed. An emitted transaction belongs
+// to the sink and stays as it is, so a later copy only counts.
+func (a *aconn) repeat(d int, pos, end uint64) {
+	a.copyEnd[d] = max(a.copyEnd[d], end)
+	for _, u := range a.unsent[d] {
+		if pos < u.end && u.pos < end && !slices.Contains(u.adu.Flags, model.FlagRetransmitted) {
+			u.adu.Flags = slices.Insert(u.adu.Flags, 0, model.FlagRetransmitted)
+		}
+	}
+}
+
+// settled forgets the ADU once its transaction is emitted.
+func (a *aconn) settled(m *model.ADU) {
+	if m == nil {
+		return
+	}
+	for d := range a.unsent {
+		if i := slices.IndexFunc(a.unsent[d], func(u unsent) bool { return u.adu == m }); i >= 0 {
+			a.unsent[d] = slices.Delete(a.unsent[d], i, i+1)
+			return
+		}
+	}
+}
+
 // consume drops the chunks that end at or before pos.
 func (a *aconn) consume(d int, pos uint64) {
 	cs := a.chunks[d]
@@ -264,12 +300,13 @@ func (a *aconn) adu(d int, f *mbtcp.ADU) {
 			}
 		}
 	}
-	if retrans {
+	if retrans || f.Pos < a.copyEnd[d] {
 		m.Flags = append(m.Flags, model.FlagRetransmitted)
 	}
 	if ooo {
 		m.Flags = append(m.Flags, model.FlagOutOfOrder)
 	}
+	a.unsent[d] = append(a.unsent[d], unsent{f.Pos, f.Pos + uint64(f.Size), m})
 	pdu := append([]byte(nil), f.PDU...)
 	if !a.decided {
 		if f.Flags&(mbtcp.Foreign|mbtcp.Truncated) == 0 && len(pdu) > 0 && len(a.samples[d]) < mbtcp.MaxSamples {
@@ -363,6 +400,8 @@ func (a *aconn) junk(d int, pos uint64, n int, why mbtcp.JunkReason) {
 }
 
 func (a *aconn) txn(t *model.Transaction) {
+	a.settled(t.Request)
+	a.settled(t.Response)
 	an := a.an
 	an.txnSeq++
 	t.Seq = an.txnSeq

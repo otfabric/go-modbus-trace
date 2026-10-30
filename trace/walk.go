@@ -36,6 +36,7 @@ type nullHandler struct{}
 
 func (nullHandler) Open(*flow.Conn)                                  {}
 func (nullHandler) Data(*flow.Conn, int, uint64, []byte, flow.Chunk) {}
+func (nullHandler) Repeat(*flow.Conn, int, uint64, uint64)           {}
 func (nullHandler) Gap(*flow.Conn, int, uint64, int64, flow.GapKind) {}
 func (nullHandler) Close(*flow.Conn)                                 {}
 
