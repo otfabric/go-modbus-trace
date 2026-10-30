@@ -1,6 +1,9 @@
 # go-modbus-trace Releases
 
-## Unreleased
+## v0.2.0
+
+**Date:** 2026-10-30
+**Previous release:** v0.1.1
 
 ### Changed
 
