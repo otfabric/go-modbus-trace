@@ -15,10 +15,10 @@ Offline only: the library never captures live and never sends anything. Pure Go,
 
 ## mbtracectl
 
-Download a binary from the [releases](https://github.com/otfabric/go-modbus-trace/releases) (Linux amd64, arm64 and armv7, macOS, Windows; static, no libpcap), or:
+Download a binary from the [releases](https://github.com/otfabric/go-modbus-trace/releases) (Linux amd64, arm64 and armv7, macOS, Windows; static, no libpcap), or build it from a checkout (the CLI is a nested module, so the library does not depend on cobra):
 
 ```sh
-go install github.com/otfabric/go-modbus-trace/cmd/mbtracectl@latest
+make build   # ./bin/mbtracectl
 ```
 
 | Command | What it tells you |

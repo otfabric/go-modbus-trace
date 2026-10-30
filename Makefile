@@ -10,6 +10,10 @@ help: ## Show targets and descriptions
 
 APP_NAME   = mbtracectl
 CMD_PKG    = ./cmd/mbtracectl
+# The CLI is a nested module (ADR-0009): ./... of this module does not reach it,
+# and building it from the repository root needs the workspace in go.work.
+CLI_DIR    = cmd/mbtracectl
+GO_CLI     = GOWORK=$(CURDIR)/go.work go
 BIN_DIR    = bin
 BINARY     = $(BIN_DIR)/$(APP_NAME)
 
@@ -48,6 +52,7 @@ check: fmt fmt-check mod-check lint lint-ci vet vuln test targets ## Format, lin
 test: ## Run unit tests (race detector)
 	@echo "Running go test -race ./..."
 	@go test -count=1 -race ./...
+	@cd $(CLI_DIR) && go test -count=1 -race ./...
 
 coverage: ## Write coverage.out (atomic mode)
 	@echo "Running tests with coverage"
@@ -68,9 +73,9 @@ soak: ## Stream SOAK_GIB GiB of generated trace through Scan and check that memo
 
 golden: ## Regenerate docs/COVERAGE.md, the JSON Schemas, testdata/plant.pcapng and its output hashes
 	@MBTRACE_UPDATE=1 go test -count=1 -run TestCoverageDoc ./mbtcp
-	@MBTRACE_UPDATE=1 go test -count=1 -run TestSchemasUpToDate ./cmd/mbtracectl
+	@cd $(CLI_DIR) && MBTRACE_UPDATE=1 go test -count=1 -run TestSchemasUpToDate .
 	@MBTRACE_UPDATE=1 go test -count=1 -run TestFixture ./trace
-	@MBTRACE_UPDATE=1 go test -count=1 -run TestGoldenOutputs ./cmd/mbtracectl
+	@cd $(CLI_DIR) && MBTRACE_UPDATE=1 go test -count=1 -run TestGoldenOutputs .
 
 tools: ## Install the pinned mbcapctl and modbusctl into GOBIN
 	@go install github.com/otfabric/go-modbus-capture/cmd/mbcapctl@$(MBCAPCTL_VERSION)
@@ -85,10 +90,12 @@ bench: ## Run benchmarks
 lint: ## Run staticcheck
 	@echo "Running staticcheck"
 	@staticcheck ./...
+	@cd $(CLI_DIR) && staticcheck ./...
 
 lint-ci: ## Run golangci-lint (.golangci.yml)
 	@echo "Running golangci-lint"
 	@golangci-lint run ./...
+	@cd $(CLI_DIR) && golangci-lint run ./...
 
 fmt: ## gofmt all Go sources with the go.mod Go version
 	@echo "Running gofmt (go$(GO_MOD_VERSION))"
@@ -103,27 +110,30 @@ mod-check: ## Fail on a replace directive or a local path in go.mod
 
 vet: ## go vet
 	@go vet ./...
+	@cd $(CLI_DIR) && go vet ./...
 
 vuln: ## Run govulncheck
 	@govulncheck ./...
+	@cd $(CLI_DIR) && govulncheck ./...
 
 targets: ## Cross-build every package for every target with CGO_ENABLED=0
 	@for t in $(TARGETS); do \
 		echo "Building $$t"; \
 		GOOS=$${t%/*} GOARCH=$${t#*/} GOARM=7 CGO_ENABLED=0 go build ./... || exit 1; \
+		(cd $(CLI_DIR) && GOOS=$${t%/*} GOARCH=$${t#*/} GOARM=7 CGO_ENABLED=0 go build -o "$(CURDIR)/$(BIN_DIR)/targets/$$t/" ./...) || exit 1; \
 	done
 
 static: ## Build mbtracectl for the Linux gateways and check that it is statically linked
 	@mkdir -p $(BIN_DIR)
 	@for a in amd64 arm64 arm; do \
-		GOOS=linux GOARCH=$$a GOARM=7 CGO_ENABLED=0 go build -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(APP_NAME)-linux-$$a $(CMD_PKG) || exit 1; \
+		GOOS=linux GOARCH=$$a GOARM=7 CGO_ENABLED=0 $(GO_CLI) build -trimpath $(LDFLAGS) -o $(BIN_DIR)/$(APP_NAME)-linux-$$a $(CMD_PKG) || exit 1; \
 		file $(BIN_DIR)/$(APP_NAME)-linux-$$a | grep -q 'statically linked' || { file $(BIN_DIR)/$(APP_NAME)-linux-$$a; exit 1; }; \
 		echo "$(APP_NAME)-linux-$$a: static"; \
 	done
 
 build: ## Build $(BINARY) (static)
 	@mkdir -p $(BIN_DIR)
-	@CGO_ENABLED=0 go build $(LDFLAGS) -o $(BINARY) $(CMD_PKG)
+	@CGO_ENABLED=0 $(GO_CLI) build $(LDFLAGS) -o $(BINARY) $(CMD_PKG)
 
 clean: ## Remove bin/ and coverage.out
 	@rm -rf $(BIN_DIR) coverage.out
