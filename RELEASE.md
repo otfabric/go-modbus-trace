@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.3.0
+
+**Date:** 2026-10-30
+**Previous release:** v0.2.0
+
+### Dependencies
+
+- `go-modbus` v1.7.2 → v1.10.0. Since v1.9.0 a context deadline no longer extends a request past `Config.Timeout`.
+
+---
+
 ## v0.2.0
 
 **Date:** 2026-10-30
