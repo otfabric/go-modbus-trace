@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.4.3
+
+**Date:** 2026-10-31
+**Previous release:** v0.4.2
+
+### Changed
+
+- The bundled command-line tools are built on v0.4.2. Library code is the same as v0.4.2.
+
+---
+
 ## v0.4.2
 
 **Date:** 2026-10-31
