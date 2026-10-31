@@ -1,0 +1,13 @@
+# Recorded exceptions to otfabric/engineering rules (docs/exceptions/ there).
+exceptions:
+  - rule: INTEROP-003
+    scope: interop/
+    justification: >-
+      The interop suite runs no container image. Its independent peer is
+      Wireshark's dissector, the tshark command of the Linux runner's package
+      repository, compared by hand on a new version (docs/TESTING.md section
+      4). The job is advisory and prints the tshark version it used.
+    owner: bartvanbos
+    reviewed: "2026-10-31"
+    reconsider: "when a *-interop image packages tshark at a pinned version"
+    ref: docs/TESTING.md
