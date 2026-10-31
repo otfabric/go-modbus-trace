@@ -1,0 +1,71 @@
+# Extended tier (otfabric/engineering standards/testing.md#ci-tiers): long
+# fuzzing, many chaos seeds and the full soak. A chaos failure logs its seed:
+# MBTRACE_CHAOS_SEED=<seed> replays it. A fuzz failure leaves its input in the
+# artifact: commit it with the fix.
+name: Nightly
+run-name: "Nightly on ${{ github.ref_name }}"
+
+on:
+  schedule:
+    - cron: "41 2 * * *"
+  workflow_dispatch:
+    inputs:
+      fuzz-time:
+        description: Time per fuzz target
+        required: false
+        default: 5m
+      chaos-seeds:
+        description: Chaos seeds
+        required: false
+        default: "3000"
+      soak-gib:
+        description: GiB of generated trace
+        required: false
+        default: "5"
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      # Stable, as in go-ci: Go 1.26's fuzz coordinator has a race.
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: make fuzz FUZZ_TIME=${{ inputs.fuzz-time || '5m' }}
+      - if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-corpus-nightly
+          path: "**/testdata/fuzz/"
+
+  chaos:
+    name: Chaos
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      MBTRACE_CHAOS_SEEDS: ${{ inputs.chaos-seeds || '3000' }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: go test -race -count=1 -timeout 80m -run Chaos ./trace
+
+  soak:
+    name: Soak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: make soak SOAK_GIB=${{ inputs.soak-gib || '5' }}

@@ -20,12 +20,13 @@ Build this first (L1); everything else depends on it. It is exported so the appl
 | Scenario | the fault scripts above end to end through `Analyze`, compared with the script's ground truth, with quality counters | LA3, LA8 |
 | Real fixtures | a few small traces captured with tcpdump on loopback between the go-modbus client and server (and, if available, from OT Fabric's own test rigs) committed under `testdata/` with expected event JSON; `testdata/README.md` lists origin, tool versions and the command used | LA1, LA6 |
 | Export | MBCAP admission matrix, property test against `capture.NewChecker`, encodings round trip with `capture.Equal`, report identity | LA9 |
-| End to end | trace -> `export mbcap` -> pinned `mbcapctl verify` -> pinned `modbusctl server replay/static` -> go-modbus client reads equal the scripted values | LA10 |
+| End to end | `e2e/`: a live go-modbus client and server over loopback, recorded to a trace file, through analysis, MBCAP export, timeline and sub-trace, and the errors of damaged files. Then trace -> `export mbcap` -> pinned `mbcapctl verify` -> pinned `modbusctl server replay/static` -> go-modbus client reads equal the scripted values | LA10 |
 | Determinism | double run; `TestGoldenOutputs` hashes every output of `testdata/plant.pcapng` (MBCAP, JSON Lines, CSV, timeline, sub-trace, summary, flows, report) against `testdata/plant.outputs.json` on every target's own runner (cross-OS); `TestCLIEqualsLibrary` | LA11 |
 | Chaos | `trace/chaos_test.go`: seeded random traffic (many clients, servers and units, every function class, malformed and vendor PDUs, pipelining, reused and unanswered IDs, orphans, TCP faults, IP fragments, clock steps, tiny limits, corrupted bytes, cancellation) through every consumer, checking invariants that hold for any input: no recovered panic, counts that agree, provenance inside the trace and carrying the ADU, the export identity, a capture that reads back, a sub-trace that re-analyses the same. 150 seeds per run (`MBTRACE_CHAOS_SEEDS`, `MBTRACE_CHAOS_SEED`) | LA3, LA8, LA14 |
 | Concurrency | `TestConcurrentUse`: Analyze, Scan, Frames and Export on one `File` from 16 goroutines (run with `-race` in `make test`) give the sequential results; a stream is read by exactly one pass | L16 |
 | Fuzz | native Go fuzz targets with seed corpora from the fixtures; `make soak` (2 GiB in CI on pull requests) | LA14 |
-| Oracle | `tshark` differential test (advisory) | LA13 |
+| Oracle | `tshark` differential test (advisory), `interop/` | LA13 |
+| Nightly | `nightly.yml`: fuzz 5 minutes per target, 3000 chaos seeds, 5 GiB soak | LA3, LA14 |
 | Build | cross-compile matrix, static check, forbidden-import check | LA15 |
 | Benchmarks | throughput, allocations, RSS at default limits | LA18 |
 
@@ -35,7 +36,7 @@ Build this first (L1); everything else depends on it. It is exported so the appl
 
 ## 4. Oracle: Wireshark's dissector
 
-Where `tshark` is installed, `TestTsharkOracle` in `trace/oracle_test.go` (run with `MBTRACE_ORACLE=1`; an advisory, non-gating CI job on Linux) runs it over a generated trace and compares per transaction: MBAP transaction ID, unit, function code, reference number, word/bit count, exception code and request/response linking. The field names were checked with `tshark -G fields | grep -i modbus` on tshark 4.6.9 and are mapped in the test. Differences are triaged by hand: tshark is a reference, not the truth (its pairing heuristics are its own); a confirmed bug on either side gets a regression fixture.
+Where `tshark` is installed, `TestTsharkOracle` in `interop/tshark_test.go` (build tag `interop`, `make interop`; an advisory, non-gating CI job on Linux; `MBTRACE_REQUIRE_INTEROP=1` fails it without tshark) runs it over a generated trace and compares per transaction: MBAP transaction ID, unit, function code, reference number, word/bit count, exception code and request/response linking. The field names were checked with `tshark -G fields | grep -i modbus` on tshark 4.6.9 and are mapped in the test. Differences are triaged by hand: tshark is a reference, not the truth (its pairing heuristics are its own); a confirmed bug on either side gets a regression fixture.
 
 Triaged so far (tshark 4.6.9):
 

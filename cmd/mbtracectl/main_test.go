@@ -326,3 +326,77 @@ func TestExtract(t *testing.T) {
 		t.Errorf("no output: exit %d", code)
 	}
 }
+
+// The flag checks of every command, before any file is read.
+func TestBadFlags(t *testing.T) {
+	path, _ := fixture(t)
+	out := filepath.Join(t.TempDir(), "o.pcapng")
+	for _, args := range [][]string{
+		{"info", "--server-port", "0", path},
+		{"info", "--server-port", "70000", path},
+		{"info", "--client", "not-an-ip", path},
+		{"flows", "--client", "not-an-ip", path},
+		{"summary", "--server", "not-an-ip", path},
+		{"summary", "--from", "soon", path},
+		{"timeline", "--server", "not-an-ip", path},
+		{"timeline", "--from", "soon", path},
+		{"extract", path},
+		{"extract", "-o", out, "--from", "soon", path},
+		{"extract", "-o", out, "--server", "not-an-ip", path},
+	} {
+		t.Run(strings.Join(args[:2], " "), func(t *testing.T) {
+			if code, _, errs := cli(t, nil, args...); code != exitUsage {
+				t.Errorf("%v: exit %d, want %d (stderr %q)", args, code, exitUsage, errs)
+			}
+		})
+	}
+}
+
+// Missing inputs are failures of the run in every command, not usage errors.
+func TestMissingInput(t *testing.T) {
+	missing := "/nonexistent/x.pcap"
+	out := filepath.Join(t.TempDir(), "o.pcapng")
+	for _, args := range [][]string{
+		{"flows", missing},
+		{"summary", missing},
+		{"timeline", missing},
+		{"extract", "-o", out, missing},
+	} {
+		if code, _, _ := cli(t, nil, args...); code != exitError {
+			t.Errorf("%v: exit %d, want %d", args, code, exitError)
+		}
+	}
+	if _, err := os.Stat(out); err == nil {
+		t.Error("extract left an output behind")
+	}
+}
+
+// A trace without Modbus says so and says how to see the rest.
+func TestNoModbusFlows(t *testing.T) {
+	var buf bytes.Buffer
+	b, err := tracetest.New(&buf, tracetest.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := b.Conn(tracetest.ConnOptions{Client: netip.MustParseAddrPort("10.0.0.1:40001"), Server: netip.MustParseAddrPort("10.0.0.3:80")})
+	h.Write(tracetest.ToServer, tracetest.WriteOpts{}, tracetest.Frame{Raw: []byte("GET / HTTP/1.1\r\n\r\n")})
+	h.Close()
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	code, out, _ := cli(t, buf.Bytes(), "flows", "-")
+	if code != exitOK || !strings.Contains(out, "no Modbus/TCP flows") {
+		t.Errorf("exit %d:\n%s", code, out)
+	}
+}
+
+// Progress mode leaves stdout as it is.
+func TestProgress(t *testing.T) {
+	path, _ := fixture(t)
+	_, want, _ := cli(t, nil, "flows", path)
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), []string{"flows", path}, strings.NewReader(""), &stdout, &stderr, true)
+	if code != exitOK || stdout.String() != want {
+		t.Fatalf("exit %d, stdout:\n%s", code, stdout.String())
+	}
+}
