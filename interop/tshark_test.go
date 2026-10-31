@@ -1,9 +1,14 @@
+//go:build interop
+
 // SPDX-License-Identifier: MIT
 
-package trace
+// Package interop compares the decoder with an independent implementation,
+// Wireshark's Modbus/TCP dissector, on the same trace.
+package interop
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,21 +17,22 @@ import (
 	"testing"
 
 	"github.com/otfabric/go-modbus-trace/model"
+	"github.com/otfabric/go-modbus-trace/trace"
 	"github.com/otfabric/go-modbus-trace/trace/tracetest"
 )
 
 // TestTsharkOracle is LA13, advisory: on the same trace, Wireshark's
 // dissector agrees with our transactions on transaction ID, unit, function,
 // reference number, count, exception code and request/response linking.
-// It runs with MBTRACE_ORACLE=1 where tshark is installed (an advisory CI
-// job); a disagreement is triaged by hand, not fixed automatically.
+// It runs in an advisory CI job; a disagreement is triaged by hand, not fixed
+// automatically. MBTRACE_REQUIRE_INTEROP=1 (make interop) fails without tshark.
 func TestTsharkOracle(t *testing.T) {
-	if os.Getenv("MBTRACE_ORACLE") == "" {
-		t.Skip("set MBTRACE_ORACLE=1 to compare with tshark")
-	}
 	tshark, err := exec.LookPath("tshark")
 	if err != nil {
-		t.Skip("tshark not installed")
+		if os.Getenv("MBTRACE_REQUIRE_INTEROP") != "" {
+			t.Fatal("MBTRACE_REQUIRE_INTEROP is set and tshark is not installed")
+		}
+		t.Skip("tshark not installed (set MBTRACE_REQUIRE_INTEROP=1 to fail instead)")
 	}
 	fields := []string{"frame.number", "mbtcp.trans_id", "mbtcp.unit_id", "modbus.func_code", "modbus.reference_num",
 		"modbus.word_cnt", "modbus.bit_cnt", "modbus.request_frame", "modbus.exception_code"}
@@ -39,7 +45,12 @@ func TestTsharkOracle(t *testing.T) {
 			t.Fatalf("this tshark has no field %s: update the mapping", f)
 		}
 	}
-	data, _ := build(t, tracetest.Options{}, func(b *tracetest.Builder) {
+	var buf bytes.Buffer
+	b, err := tracetest.New(&buf, tracetest.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	{
 		c := b.Conn(tracetest.ConnOptions{})
 		c.Request(1, 1, tracetest.ReadRequest(3, 100, 4))
 		c.Response(1, 1, tracetest.RegistersResponse(3, 1, 2, 3, 4))
@@ -54,7 +65,11 @@ func TestTsharkOracle(t *testing.T) {
 		c.Response(6, 1, tracetest.RegistersResponse(3, 9))
 		c.Response(5, 1, []byte{2, 1, 0x5A})
 		c.Close()
-	})
+	}
+	if err := b.Close(); err != nil {
+		t.Fatal(err)
+	}
+	data := buf.Bytes()
 	path := filepath.Join(t.TempDir(), "o.pcap")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
@@ -73,9 +88,18 @@ func TestTsharkOracle(t *testing.T) {
 		n, _ := strconv.ParseUint(r[0], 10, 64)
 		rows[n] = r
 	}
-	_, evs := analyze(t, data, Options{})
+	var txns []*model.Transaction
+	_, err = trace.Analyze(context.Background(), trace.OpenReader(bytes.NewReader(data)), trace.Options{}, trace.SinkFunc(func(e *model.Event) error {
+		if e.Txn != nil {
+			txns = append(txns, e.Txn)
+		}
+		return nil
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
 	n := 0
-	for _, tx := range txns(evs) {
+	for _, tx := range txns {
 		if tx.Request == nil || tx.Response == nil {
 			continue
 		}

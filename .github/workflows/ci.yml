@@ -36,7 +36,7 @@ jobs:
     uses: otfabric/.github/.github/workflows/go-ci.yml@v3.2.0
     with:
       module-dir: cmd/mbtracectl
-      coverage-min: "85"
+      coverage-min: "90"
       test-exclude-regex: "/example(s)?($|/)"
       run-codecov: false
       go-versions: '["1.23", "1.24", "1.25", "1.26", "1.27"]'
@@ -94,6 +94,18 @@ jobs:
           file mbtracectl
           file mbtracectl | grep -q 'statically linked'
 
+  # The per-package coverage floor (TEST-012).
+  coverage-packages:
+    name: Per-package coverage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: make coverage-pkg-check
+
   # LA10: trace -> export mbcap -> the pinned mbcapctl verify and modbusctl
   # replay -> a go-modbus client reads the scripted values. Required here.
   replay:
@@ -125,7 +137,7 @@ jobs:
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends tshark
           tshark --version | head -n1
       - name: Compare with tshark
-        run: MBTRACE_ORACLE=1 go test -count=1 -run 'TestTsharkOracle|TestExtract' -v ./trace ./export/subtrace
+        run: make interop
 
   # LA18: Scan and Analyze throughput on pull requests, the base against the
   # head on the same runner. Reported, not gating: a slowdown above 20% is a

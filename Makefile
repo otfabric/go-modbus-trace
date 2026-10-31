@@ -1,4 +1,4 @@
-.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets static fuzz soak golden bench tools replay build check clean coverage-check cross e2e interop
+.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets static fuzz soak golden bench tools replay build check clean coverage-check cross e2e interop coverage-pkg-check
 
 # Prefer module-local dependency resolution when a sibling go.work exists.
 export GOWORK := off
@@ -32,6 +32,8 @@ TARGETS = linux/amd64 linux/arm64 linux/arm darwin/arm64 darwin/amd64 windows/am
 # Fuzz targets and the time each gets in `make fuzz`.
 # Same minimum as coverage-min in ci.yml.
 COVER_MIN := 90
+# Per-package floor (TEST-012): what the weakest package measures now, rounded down.
+COVER_PKG_MIN := 85
 FUZZ_TIME ?= 30s
 FUZZ_TARGETS = ./internal/pcapio:FuzzPcapReader ./internal/pcapio:FuzzPcapngReader ./internal/link:FuzzLinkIPTCP \
 	./mbtcp:FuzzFramer ./mbtcp:FuzzDecodeRequest ./mbtcp:FuzzDecodeResponse ./trace:FuzzPipeline
@@ -53,13 +55,21 @@ coverage-check: coverage ## Fail when total coverage is below COVER_MIN
 
 cross: targets ## Alias of targets (GO-007 canonical name)
 
-e2e: replay ## Alias of replay: mbtracectl output through the pinned mbcapctl and modbusctl (make tools)
+e2e: ## A live go-modbus conversation through the public API (e2e/), then replay (make tools)
+	@go test -count=1 -race ./e2e/...
+	@$(MAKE) replay
 
 interop: ## Compare the decoder with Wireshark's dissector (tshark on PATH; advisory, never a conformance claim)
 	@command -v tshark >/dev/null || { echo "tshark is not installed"; exit 1; }
-	@MBTRACE_ORACLE=1 go test -count=1 -run 'TestTsharkOracle|TestExtract' -v ./trace ./export/subtrace
+	@MBTRACE_REQUIRE_INTEROP=1 go test -count=1 -tags interop -v ./interop/...
+	@go test -count=1 -run 'TestExtract' -v ./export/subtrace
 
-check: fmt fmt-check mod-check lint lint-ci vet vuln test targets ## Format, lint, vet, vuln, test and cross-build
+coverage-pkg-check: coverage ## Fail when a package is below COVER_PKG_MIN
+	@awk -v m="$(COVER_PKG_MIN)" 'NR > 1 { n[$$1] = $$2; if ($$3 > 0) h[$$1] = 1 } \
+	END { for (k in n) { p = k; sub(/\/[^\/]*$$/, "", p); s[p] += n[k]; if (k in h) c[p] += n[k] } \
+	for (p in s) { v = 100 * c[p] / s[p]; if (v < m) { printf "%s: %.1f%% < %s%%\n", p, v, m; bad = 1 } } exit bad }' coverage.out
+
+check: fmt fmt-check mod-check lint lint-ci vet vuln test coverage-pkg-check targets ## Format, lint, vet, vuln, test and cross-build
 
 test: ## Run unit tests (race detector)
 	@echo "Running go test -race ./..."

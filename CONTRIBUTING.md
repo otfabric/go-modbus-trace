@@ -22,7 +22,7 @@ make bench     # Scan and Analyze throughput
 make golden    # regenerate docs/COVERAGE.md, docs/schema/ and testdata/plant.pcapng
 ```
 
-Run `make` (or `make help`) for the full list of targets. `MBTRACE_ORACLE=1 go test -run TestTsharkOracle ./trace` compares the decoder with Wireshark's.
+Run `make` (or `make help`) for the full list of targets. `make interop` compares the decoder with Wireshark's.
 
 ## Rules
 
