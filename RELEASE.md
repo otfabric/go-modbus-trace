@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.4.1
+
+**Date:** 2026-10-31
+**Previous release:** v0.4.0
+
+### Fixed
+
+- `mbtracectl` is built on this library's v0.4.0: it was still on v0.2.0, so its binaries lacked the fixes of v0.3.0 and v0.4.0.
+
+---
+
 ## v0.4.0
 
 **Date:** 2026-10-30
