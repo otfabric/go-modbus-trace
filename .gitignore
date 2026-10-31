@@ -26,3 +26,7 @@ go.work.sum
 *.mbcap
 !testdata/**
 /cmd/mbtracectl/mbtracectl
+
+# Build artefacts live in /bin/ and /release/ (otfabric/engineering REPO-005)
+*.test
+coverage.out

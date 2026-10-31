@@ -18,7 +18,7 @@ permissions:
 jobs:
   # Organisation checks: format, lint, vet, vulnerabilities, race tests, coverage.
   ci:
-    uses: otfabric/.github/.github/workflows/go-ci.yml@v3.2.0
+    uses: otfabric/.github/.github/workflows/go-ci.yml@v3.3.0
     with:
       run-govulncheck: true
       coverage-min: "90"
@@ -33,7 +33,7 @@ jobs:
 
   # The CLI is a nested module (ADR-0009).
   cli:
-    uses: otfabric/.github/.github/workflows/go-ci.yml@v3.2.0
+    uses: otfabric/.github/.github/workflows/go-ci.yml@v3.3.0
     with:
       module-dir: cmd/mbtracectl
       coverage-min: "90"
