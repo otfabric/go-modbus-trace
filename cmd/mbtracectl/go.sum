@@ -5,8 +5,8 @@ github.com/inconshreveable/mousetrap v1.1.0 h1:wN+x4NVGpMsO7ErUn/mUI3vEoE6Jt13X2
 github.com/inconshreveable/mousetrap v1.1.0/go.mod h1:vpF70FUmC8bwa3OWnCshd2FqLfsEA9PFc4w1p2J65bw=
 github.com/otfabric/go-modbus v1.10.1 h1:7aZYDrFNSet6cmRtcFCE1ZKtjuEcULPueR0d57OBawA=
 github.com/otfabric/go-modbus v1.10.1/go.mod h1:YYlr+UYfnsPjT40Q/zYClB/3mjjP1kYuHjVW2hTYeBs=
-github.com/otfabric/go-modbus-capture v0.0.2 h1:Y/3hRz2+oQVuAHV3SYbeQ2aCAt2WtUZjHsb+2DlAFj0=
-github.com/otfabric/go-modbus-capture v0.0.2/go.mod h1:0EjVYP0QdiwAnU50MeG7o6IBVvdcy87uHPYFET1HlgE=
+github.com/otfabric/go-modbus-capture v0.0.3 h1:M3c4N3ZVe82Uu8/rgwWTeBV8jS8IO9mAuUCMkZ4Bgu8=
+github.com/otfabric/go-modbus-capture v0.0.3/go.mod h1:0EjVYP0QdiwAnU50MeG7o6IBVvdcy87uHPYFET1HlgE=
 github.com/otfabric/go-modbus-trace v0.4.0 h1:I/jUATGS9ymQh8EpKPmb8bYglOBInXB1FXi4LLwlR7E=
 github.com/otfabric/go-modbus-trace v0.4.0/go.mod h1:d5n8MQqxQaD+1WHWptqqnD/e4vwz1HM5qrmt88/qQbw=
 github.com/otfabric/go-serial v0.2.0 h1:tIumMlNTy0xoTHClZJZXFcqywBz6poNegxTqYDV8MEA=
