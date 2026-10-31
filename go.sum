@@ -1,11 +1,11 @@
 github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=
 github.com/dlclark/regexp2 v1.11.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
-github.com/otfabric/go-modbus v1.10.1 h1:7aZYDrFNSet6cmRtcFCE1ZKtjuEcULPueR0d57OBawA=
-github.com/otfabric/go-modbus v1.10.1/go.mod h1:YYlr+UYfnsPjT40Q/zYClB/3mjjP1kYuHjVW2hTYeBs=
-github.com/otfabric/go-modbus-capture v0.0.2 h1:Y/3hRz2+oQVuAHV3SYbeQ2aCAt2WtUZjHsb+2DlAFj0=
-github.com/otfabric/go-modbus-capture v0.0.2/go.mod h1:0EjVYP0QdiwAnU50MeG7o6IBVvdcy87uHPYFET1HlgE=
-github.com/otfabric/go-serial v0.2.0 h1:tIumMlNTy0xoTHClZJZXFcqywBz6poNegxTqYDV8MEA=
-github.com/otfabric/go-serial v0.2.0/go.mod h1:TqbYpWWg6W+IuCLs8YM2cndlMAEaTyaKyUX6Z08gtq8=
+github.com/otfabric/go-modbus v1.10.3 h1:aqNcwsOSkhiM1jkJTd5oabiySZAyGzGa86kZJLTSva4=
+github.com/otfabric/go-modbus v1.10.3/go.mod h1:LciyfLtd+4wKhQrDV5TjdrRH3NB60A+5d9bzTtGHQW4=
+github.com/otfabric/go-modbus-capture v0.0.3 h1:M3c4N3ZVe82Uu8/rgwWTeBV8jS8IO9mAuUCMkZ4Bgu8=
+github.com/otfabric/go-modbus-capture v0.0.3/go.mod h1:0EjVYP0QdiwAnU50MeG7o6IBVvdcy87uHPYFET1HlgE=
+github.com/otfabric/go-serial v0.2.1 h1:PCOdnCDAHIHFaxTBNmisC/4SlD+NVd74d+EJPnXrCOw=
+github.com/otfabric/go-serial v0.2.1/go.mod h1:TqbYpWWg6W+IuCLs8YM2cndlMAEaTyaKyUX6Z08gtq8=
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.3 h1:1EYB5IzjZawrrnELUi78f9fPu57HuXjmddZPjrls/28=
 github.com/santhosh-tekuri/jsonschema/v6 v6.0.3/go.mod h1:JXeL+ps8p7/KNMjDQk3TCwPpBy0wYklyWTfbkIzdIFU=
 golang.org/x/text v0.14.0 h1:ScX5w1eTa3QqT8oi6+ziP7dTV1S2+ALU0bI+0zXKWiQ=
