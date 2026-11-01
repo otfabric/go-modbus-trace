@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.4.4
+
+**Date:** 2026-11-01
+**Previous release:** v0.4.3
+
+### Changed
+
+- Dependency update, no other change. Moves to go-modbus v1.10.5, which has the fix for a response that arrives during `Client.Close`.
+
+---
+
 ## v0.4.3
 
 **Date:** 2026-10-31
