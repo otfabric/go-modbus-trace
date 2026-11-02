@@ -2,7 +2,7 @@
 
 ## v0.4.5
 
-**Date:** 2026-11-02
+**Date:** 2026-11-03
 **Previous release:** v0.4.4
 
 ### Changed
