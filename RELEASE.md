@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.4.5
+
+**Date:** 2026-11-03
+**Previous release:** v0.4.4
+
+### Changed
+
+- Dependency update, no other change. Moves to go-modbus v1.10.6, whose codec count checks compare the full length of a slice.
+
+---
+
 ## v0.4.4
 
 **Date:** 2026-11-01
