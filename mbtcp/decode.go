@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
+	"slices"
 )
 
 // As says how a PDU is decoded: as a request or as a response.
@@ -109,10 +110,8 @@ type dec struct {
 }
 
 func (d *dec) warn(w string) {
-	for _, x := range d.v.Warnings {
-		if x == w {
-			return
-		}
+	if slices.Contains(d.v.Warnings, w) {
+		return
 	}
 	d.v.Warnings = append(d.v.Warnings, w)
 }
@@ -132,17 +131,15 @@ func (d *dec) exact(n int) {
 	}
 }
 
-func num(v uint64) *uint64 { return &v }
-
 func (d *dec) u8(name string, off int) uint8 {
 	x := d.p[off]
-	d.v.Fields = append(d.v.Fields, Field{Name: name, Offset: HeaderLen + off, Length: 1, Value: num(uint64(x))})
+	d.v.Fields = append(d.v.Fields, Field{Name: name, Offset: HeaderLen + off, Length: 1, Value: new(uint64(x))})
 	return x
 }
 
 func (d *dec) u16(name string, off int) uint16 {
 	x := binary.BigEndian.Uint16(d.p[off:])
-	d.v.Fields = append(d.v.Fields, Field{Name: name, Offset: HeaderLen + off, Length: 2, Value: num(uint64(x))})
+	d.v.Fields = append(d.v.Fields, Field{Name: name, Offset: HeaderLen + off, Length: 2, Value: new(uint64(x))})
 	return x
 }
 
@@ -171,7 +168,7 @@ func Decode(as As, pdu []byte) View {
 	}
 	fc := pdu[0]
 	v.Function = fc & 0x7F
-	d.v.Fields = append(d.v.Fields, Field{Name: "function", Offset: HeaderLen, Length: 1, Value: num(uint64(fc))})
+	d.v.Fields = append(d.v.Fields, Field{Name: "function", Offset: HeaderLen, Length: 1, Value: new(uint64(fc))})
 	f := functions[v.Function]
 	if f != nil {
 		v.Name, v.Known, v.Class = f.Name, true, f.Class
@@ -605,7 +602,7 @@ func fc43Resp(d *dec) {
 	d.u8("next_object_id", 5)
 	n := int(d.u8("number_of_objects", 6))
 	off := 7
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if off+2 > len(d.p) {
 			d.warn(WarnMEIStructure)
 			return

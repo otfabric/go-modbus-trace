@@ -153,7 +153,7 @@ func TestInputsCLI(t *testing.T) {
 	code, two, errs := cli(t, nil, "timeline", "--format", "jsonl", pa, pb)
 	strip := func(s string) string { // frame references name their file; nothing else may differ
 		var out []string
-		for _, l := range strings.Split(s, "\n") {
+		for l := range strings.SplitSeq(s, "\n") {
 			var e map[string]any
 			if json.Unmarshal([]byte(l), &e) != nil {
 				continue

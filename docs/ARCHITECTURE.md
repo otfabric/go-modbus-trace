@@ -330,4 +330,4 @@ Resolved on: 2026-10-15, from the local module cache (the L0 work was offline; n
 | `github.com/otfabric/go-modbus` | v1.7.1 | | tests only (LA6, LA10) | L2 |
 | `github.com/gopacket/gopacket` | v1.7.4 | 2026-10-01 | **not used** (`DECISIONS.md` D1-D3) | |
 
-The `go` directive is `go 1.23`: go-modbus-capture v0.0.2 declares 1.23, cobra 1.15 (`DECISIONS.md` D8).
+The `go` directive is `go 1.26.0`, the OT Fabric minimum since 2026-11-05; it was `go 1.23` before, as go-modbus-capture v0.0.2 declares 1.23 and cobra 1.15 (`DECISIONS.md` D8).

@@ -353,10 +353,7 @@ func (c *Coverage) Event(e *model.Event) error {
 			x = &spaceCov{server: t.Server.String(), unit: t.Unit, space: string(r.Space)}
 			c.m[k] = x
 		}
-		end := uint32(r.Start) + uint32(r.Count) - 1
-		if end > 0xFFFF {
-			end = 0xFFFF
-		}
+		end := min(uint32(r.Start)+uint32(r.Count)-1, 0xFFFF)
 		iv := Interval{Start: r.Start, End: uint16(end), Count: 1}
 		span(&iv.First, &iv.Last, t.Time())
 		if r.Write {

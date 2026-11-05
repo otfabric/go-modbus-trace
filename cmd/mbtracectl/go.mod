@@ -1,10 +1,10 @@
 module github.com/otfabric/go-modbus-trace/cmd/mbtracectl
 
-go 1.23
+go 1.26.0
 
 require (
 	github.com/otfabric/go-modbus-capture v0.0.3
-	github.com/otfabric/go-modbus-trace v0.4.2
+	github.com/otfabric/go-modbus-trace v0.4.5
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/pflag v1.0.9

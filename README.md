@@ -1,6 +1,6 @@
 # go-modbus-trace
 
-[![Go Version](https://img.shields.io/badge/Go-1.23%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8?style=flat&logo=go)](https://go.dev/)
 [![Go Reference](https://pkg.go.dev/badge/github.com/otfabric/go-modbus-trace.svg)](https://pkg.go.dev/github.com/otfabric/go-modbus-trace)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![CI Status](https://github.com/otfabric/go-modbus-trace/actions/workflows/ci.yml/badge.svg)](https://github.com/otfabric/go-modbus-trace/actions/workflows/ci.yml)

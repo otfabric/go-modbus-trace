@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,10 +29,8 @@ func openInputs(e *env, args []string) (*trace.File, error) {
 	if len(args) == 1 {
 		return open(e, args[0])
 	}
-	for _, a := range args {
-		if a == "-" {
-			return nil, usageErr("standard input (-) cannot be combined with other inputs")
-		}
+	if slices.Contains(args, "-") {
+		return nil, usageErr("standard input (-) cannot be combined with other inputs")
 	}
 	return trace.OpenFiles(args...)
 }

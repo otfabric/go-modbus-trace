@@ -519,9 +519,7 @@ func TestConcurrentUse(t *testing.T) {
 	}
 	var wg sync.WaitGroup
 	for g := range 16 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			switch g % 4 {
 			case 0:
 				if _, _, got, err := events(ctx, f, trace.Options{}); err != nil || !bytes.Equal(got, want) {
@@ -543,7 +541,7 @@ func TestConcurrentUse(t *testing.T) {
 					t.Errorf("goroutine %d: %v", g, err)
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
@@ -552,9 +550,7 @@ func TestConcurrentUse(t *testing.T) {
 	var ok, consumed int
 	var mu sync.Mutex
 	for range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, _, err := trace.Scan(ctx, s, trace.ScanOptions{})
 			mu.Lock()
 			defer mu.Unlock()
@@ -566,7 +562,7 @@ func TestConcurrentUse(t *testing.T) {
 			default:
 				t.Error(err)
 			}
-		}()
+		})
 	}
 	wg.Wait()
 	if ok != 1 || consumed != 7 {

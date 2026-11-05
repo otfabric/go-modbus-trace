@@ -172,7 +172,7 @@ func TestClassifyMatchesTheChecker(t *testing.T) {
 	for sub := 0; sub <= 0x20; sub++ {
 		try([]byte{8, 0, byte(sub), 0, 0}, []byte{8, 0, byte(sub), 0, 0})
 	}
-	for mei := 0; mei < 256; mei++ {
+	for mei := range 256 {
 		try([]byte{43, byte(mei), 1, 0}, []byte{43, byte(mei), 1, 1, 0, 0, 0})
 	}
 }

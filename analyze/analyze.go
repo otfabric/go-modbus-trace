@@ -8,6 +8,7 @@ package analyze
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"time"
 
@@ -79,7 +80,7 @@ func (h *Histogram) Quantile(q float64) time.Duration {
 	for k := range h.buckets {
 		keys = append(keys, k)
 	}
-	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	slices.Sort(keys)
 	target := uint64(math.Ceil(q * float64(h.n)))
 	var seen uint64
 	for _, k := range keys {

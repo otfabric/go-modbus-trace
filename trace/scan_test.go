@@ -118,7 +118,7 @@ func checkADUs(t *testing.T, r result, tr *tracetest.Truth) {
 func diff(g, w map[string][]string) string {
 	var b strings.Builder
 	for c := uint32(1); c < 64; c++ {
-		for d := 0; d < 2; d++ {
+		for d := range 2 {
 			k := fmt.Sprintf("c%d/%d", c, d)
 			x, y := g[k], w[k]
 			for i := 0; i < max(len(x), len(y)); i++ {
@@ -142,7 +142,7 @@ func diff(g, w map[string][]string) string {
 func flat(m map[string][]string) []string {
 	var out []string
 	for c := uint32(1); c < 64; c++ {
-		for d := 0; d < 2; d++ {
+		for d := range 2 {
 			out = append(out, m[fmt.Sprintf("c%d/%d", c, d)]...)
 		}
 	}

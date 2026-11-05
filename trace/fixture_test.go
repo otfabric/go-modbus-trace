@@ -33,7 +33,7 @@ func plant() []byte {
 	inv.Request(1, 1, []byte{0x2B, 0x0E, 0x01, 0x00})
 	inv.Response(1, 1, id)
 	setpoint := uint16(100)
-	for s := 0; s < 60; s++ {
+	for s := range 60 {
 		tid := uint16(10 + s)
 		if s == 30 {
 			setpoint = 80

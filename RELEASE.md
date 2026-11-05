@@ -1,5 +1,18 @@
 # go-modbus-trace Releases
 
+## v0.5.0
+
+**Date:** 2026-11-05
+**Previous release:** v0.4.5
+
+### Changed
+
+- Go 1.26 or later is required (was 1.23); CI runs Go 1.26 and 1.27. `go fix` modernised the code; no API changes.
+- Tests use go-modbus v1.11.0 (the library does not import it outside tests).
+- `mbtracectl` is built on go-modbus-trace v0.4.5 (was v0.4.2).
+
+---
+
 ## v0.4.5
 
 **Date:** 2026-11-03
