@@ -1,5 +1,21 @@
 # go-modbus-trace Releases
 
+## v0.5.1
+
+**Date:** 2026-11-05
+**Previous release:** v0.5.0
+
+### Changed
+
+- Moves to go-modbus-capture v0.1.0 (Go 1.26 floor, no change in behaviour); tests use go-modbus v1.11.1.
+- `mbtracectl` is built on go-modbus-trace v0.5.0 (was v0.4.5) and go-modbus-capture v0.1.0.
+
+### Fixed
+
+- MBCAP exports and the exclusion report recorded the library as `go-modbus-trace 0.1.0` whatever the version. They now record the version linked in, read from the build information like the go-modbus-capture version (new `mbcapexport.LibraryVersion`); `trace.Version` is the fallback, now `(devel)`. Exports from the same trace, options and library version stay byte-identical.
+
+---
+
 ## v0.5.0
 
 **Date:** 2026-11-05

@@ -120,7 +120,7 @@ type ReplayEstimate struct {
 }
 
 func newReport() *Report {
-	r := &Report{SchemaVersion: ReportSchemaVersion, Library: "go-modbus-trace " + trace.Version,
+	r := &Report{SchemaVersion: ReportSchemaVersion, Library: "go-modbus-trace " + LibraryVersion(),
 		CaptureLibrary: "go-modbus-capture " + CaptureLibraryVersion(), Excluded: map[string]uint64{}}
 	for _, x := range Reasons {
 		r.Excluded[string(x)] = 0
