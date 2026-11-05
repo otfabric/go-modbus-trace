@@ -135,9 +135,7 @@ func record(t *testing.T) (string, [][]uint16) {
 	}
 	defer func() { _ = l.Close() }()
 	rec := &recorder{}
-	rec.wg.Add(1)
-	go func() {
-		defer rec.wg.Done()
+	rec.wg.Go(func() {
 		cc, err := l.Accept()
 		if err != nil {
 			return
@@ -150,7 +148,7 @@ func record(t *testing.T) (string, [][]uint16) {
 		rec.wg.Add(2)
 		go rec.pipe(sc, cc, true)
 		go rec.pipe(cc, sc, false)
-	}()
+	})
 
 	client, err := modbus.New(modbus.Config{URL: "tcp://" + l.Addr().String(), Timeout: 5 * time.Second})
 	if err != nil {

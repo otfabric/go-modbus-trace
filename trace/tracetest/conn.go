@@ -5,6 +5,7 @@ package tracetest
 import (
 	"encoding/binary"
 	"net/netip"
+	"slices"
 )
 
 // Dir is a direction of a connection.
@@ -239,12 +240,7 @@ type WriteOpts struct {
 }
 
 func has(xs []int, i int) bool {
-	for _, x := range xs {
-		if x == i {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(xs, i)
 }
 
 // Resend sends the direction's last Write again as one identical segment,

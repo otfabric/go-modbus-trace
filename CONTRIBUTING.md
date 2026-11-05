@@ -6,7 +6,7 @@ Thank you for your interest in contributing. Read [`AGENTS.md`](AGENTS.md) first
 
 ### Prerequisites
 
-- Go 1.23+ (see [go.mod](go.mod)); CI and releases build with the current stable Go
+- Go 1.26+ (see [go.mod](go.mod)); CI and releases build with the current stable Go
 - [staticcheck](https://staticcheck.dev/), [golangci-lint](https://golangci-lint.run/) v2 and [govulncheck](https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck) for the checks
 - No privileges, no network and no real traces: the tests build their traces with `trace/tracetest`
 - Optional: `tshark` for the oracle test, and the pinned `mbcapctl` and `modbusctl` for the replay test (`make tools`)

@@ -109,29 +109,29 @@ func TestSchemaCoversModel(t *testing.T) {
 		return defs[def].(map[string]any)["properties"].(map[string]any)
 	}
 	for def, typ := range map[string]reflect.Type{
-		"":            reflect.TypeOf(model.Event{}),
-		"connection":  reflect.TypeOf(model.Connection{}),
-		"transaction": reflect.TypeOf(model.Transaction{}),
-		"adu":         reflect.TypeOf(model.ADU{}),
-		"frame_ref":   reflect.TypeOf(model.FrameRef{}),
-		"gap":         reflect.TypeOf(model.Gap{}),
-		"resync":      reflect.TypeOf(model.Resync{}),
-		"note":        reflect.TypeOf(model.Note{}),
-		"view":        reflect.TypeOf(mbtcp.View{}),
-		"field":       reflect.TypeOf(mbtcp.Field{}),
-		"range":       reflect.TypeOf(mbtcp.Range{}),
+		"":            reflect.TypeFor[model.Event](),
+		"connection":  reflect.TypeFor[model.Connection](),
+		"transaction": reflect.TypeFor[model.Transaction](),
+		"adu":         reflect.TypeFor[model.ADU](),
+		"frame_ref":   reflect.TypeFor[model.FrameRef](),
+		"gap":         reflect.TypeFor[model.Gap](),
+		"resync":      reflect.TypeFor[model.Resync](),
+		"note":        reflect.TypeFor[model.Note](),
+		"view":        reflect.TypeFor[mbtcp.View](),
+		"field":       reflect.TypeFor[mbtcp.Field](),
+		"range":       reflect.TypeFor[mbtcp.Range](),
 	} {
 		p := props(def)
 		var names []string
-		for i := 0; i < typ.NumField(); i++ {
-			tag, _, _ := strings.Cut(typ.Field(i).Tag.Get("json"), ",")
+		for field := range typ.Fields() {
+			tag, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 			if tag == "" || tag == "-" {
-				t.Errorf("%s.%s has no JSON name", typ.Name(), typ.Field(i).Name)
+				t.Errorf("%s.%s has no JSON name", typ.Name(), field.Name)
 				continue
 			}
 			names = append(names, tag)
 			if _, ok := p[tag]; !ok {
-				t.Errorf("schema %q lacks %s (%s.%s)", def, tag, typ.Name(), typ.Field(i).Name)
+				t.Errorf("schema %q lacks %s (%s.%s)", def, tag, typ.Name(), field.Name)
 			}
 		}
 		if len(names) != len(p) {

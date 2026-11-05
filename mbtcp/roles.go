@@ -5,6 +5,7 @@ package mbtcp
 import (
 	"encoding/binary"
 	"net/netip"
+	"slices"
 )
 
 // RoleSource says how the server of a connection was decided.
@@ -115,12 +116,7 @@ func DecideRole(in RoleInput) Role {
 }
 
 func portIn(ports []uint16, p uint16) bool {
-	for _, x := range ports {
-		if x == p {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ports, p)
 }
 
 // structure scores the orientation in which direction req sends requests:

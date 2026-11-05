@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -503,12 +504,7 @@ func TestGoModbusFrames(t *testing.T) {
 }
 
 func hasFlag(t *model.Transaction, f string) bool {
-	for _, x := range t.Flags {
-		if x == f {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(t.Flags, f)
 }
 
 // regsHex returns the hex of every raw-data field of a view.
