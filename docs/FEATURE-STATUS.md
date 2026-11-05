@@ -8,7 +8,7 @@ None of this is a conformance claim: nothing is certified.
 
 | go-modbus-trace | Go | go-modbus-capture | Supported |
 |---|---|---|---|
-| **v0.5.1** | 1.26 or later (CI: 1.26 and 1.27) | v0.1.0 | **yes** |
+| **v0.5.2** | 1.26 or later (CI: 1.26 and 1.27) | v0.1.0 | **yes** |
 
 ## 2. Platforms
 

@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.5.2
+
+**Date:** 2026-11-05
+**Previous release:** v0.5.1
+
+### Changed
+
+- `mbtracectl` is built on go-modbus-trace v0.5.1, so its MBCAP exports and reports record the library version linked in instead of `go-modbus-trace 0.1.0`. Library code is the same as v0.5.1.
+
+---
+
 ## v0.5.1
 
 **Date:** 2026-11-05
