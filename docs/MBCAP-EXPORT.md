@@ -17,7 +17,7 @@ How events from a passive trace become an MBCAP file that `modbusctl server repl
 | `Header.Exceptions` | `true` by default (writers drop exception responses otherwise *(verified)*). `--no-exceptions` turns it off. |
 | `Header.ChangeOnly` | `false` by default: repeated identical responses are kept, so the poll cadence survives. `--change-only` is an explicit derived export; the writer then drops repeated responses and the report counts them (`change_only_dropped`). |
 | `Header.Producer` | e.g. `modbus-trace-explorer 0.1.0 (go-modbus-trace 0.1.0)` or `mbtracectl 0.1.0`, passed in by the caller. |
-| `Header.Tags` | `trace.file` (base names only, no paths), `trace.sha256` (per input, in order), `trace.format` (`pcap`/`pcapng`), `trace.first_packet`, `trace.last_packet` (RFC 3339 with nanoseconds), `trace.link_types`, `trace.tool` (pcapng `shb_userappl`/`shb_os` when present), `trace.clock` = `packet timestamps`, `export.selection` (canonical string of the selection), `export.admission` = `reads-only/1`, `export.library` and `export.capture_library` (versions). The reserved key `provenance` is set with `edit.WithProvenance(header, "go-modbus-trace <ver> export mbcap")` (the library convention: command and flags, no file names). The reserved key `source` is not used. |
+| `Header.Tags` | `trace.file` (base names only, no paths), `trace.sha256` (per input, in order), `trace.format` (`pcap`/`pcapng`), `trace.first_packet`, `trace.last_packet` (RFC 3339 with nanoseconds), `trace.link_types`, `trace.tool` (pcapng `shb_userappl`/`shb_os` when present), `trace.clock` = `packet timestamps`, `export.selection` (canonical string of the selection), `export.admission` = `reads-only/1`, `export.library` and `export.capture_library` (the module versions linked in, from the build information). The reserved key `provenance` is set with `edit.WithProvenance(header, "go-modbus-trace <ver> export mbcap")` (the library convention: command and flags, no file names). The reserved key `source` is not used. |
 | `Target` | One per **(server IP, server port, unit ID)**. `ID` = 1, 2, 3, ... in order of the first exported transaction. `Transport = TransportTCP`, `Host` = the server address as `netip.Addr.String()`, `Port`, `Unit`. `Label` = `--name ip:port/unit=Label` if given, else `<ip>:<port> unit <unit>`. Target tags: `trace.role_source` (`override|syn|port|structure`). A server seen on two interfaces is one target; the endpoint is advisory and a replayer may override it *(verified: concepts.md)*. |
 | `Stream` | One per **(target, client IP address)**. `ID` in order of first use, `Role = "passive"` (free label; the conventional ones are poll, scan, identity, snapshot, other), `Label = "client <ip>"`. A client that reconnects, or uses several ports, stays in one stream; connection epochs, client ports and MBAP transaction IDs live in the trace, not in MBCAP. Why not one stream per connection: modbusctl hosts all streams of a target merged by time and has no stream-selection flag *(verified: `ReplayServerConfig` has none; `replay.Options.Streams` is internal)*, so finer streams buy nothing and cost index size. |
 | `Sample` | `Stream`; `At` = ticks of the time the **last packet of the response ADU** was observed (the instant the response was fully received); `Request` and `Response` = the raw PDUs including the function code byte (never the MBAP header). |
@@ -63,8 +63,8 @@ Written next to the capture on request (`--report report.json`) and returned by 
 ```json
 {
   "schema_version": 1,
-  "library": "go-modbus-trace 0.1.0",
-  "capture_library": "go-modbus-capture 0.0.2",
+  "library": "go-modbus-trace v0.5.1",
+  "capture_library": "go-modbus-capture v0.1.0",
   "format": "MBCAP draft 0.1",
   "inputs": [{"file": "site.pcapng", "sha256": "...", "packets": 1830211, "first": "...", "last": "..."}],
   "selection": "unit=1,2; from=0s",

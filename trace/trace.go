@@ -187,5 +187,6 @@ type ScanOptions struct {
 	Progress func(read, total int64)
 }
 
-// Version is the version of this library, recorded in exports.
-const Version = "0.1.0"
+// Version is the version exports record for this library when the build
+// information has none (mbcapexport.LibraryVersion reads it from there).
+const Version = "(devel)"

@@ -324,7 +324,7 @@ func (x *exporter) write(sum *trace.FileSummary, open Open) (*Report, error) {
 		Producer: x.eo.Producer, Tags: x.tags(sum)}
 	step := x.eo.Step
 	if step == "" {
-		step = "go-modbus-trace " + trace.Version + " export mbcap"
+		step = "go-modbus-trace " + LibraryVersion() + " export mbcap"
 	}
 	h = edit.WithProvenance(h, step)
 	ticks := func(ns int64) capture.Ticks { return h.Ticks(time.Duration(ns - wall.UnixNano())) }
@@ -453,7 +453,7 @@ func (x *exporter) tags(sum *trace.FileSummary) map[string]string {
 	t := map[string]string{
 		"trace.clock":            "packet timestamps",
 		"export.admission":       "reads-only/1",
-		"export.library":         "go-modbus-trace " + trace.Version,
+		"export.library":         "go-modbus-trace " + LibraryVersion(),
 		"export.capture_library": "go-modbus-capture " + CaptureLibraryVersion(),
 	}
 	var files, sums, formats []string
@@ -496,17 +496,48 @@ func (x *exporter) tags(sum *trace.FileSummary) map[string]string {
 
 // CaptureLibraryVersion returns the version of go-modbus-capture linked in.
 func CaptureLibraryVersion() string {
-	if bi, ok := debug.ReadBuildInfo(); ok {
-		for _, d := range bi.Deps {
-			if d.Path == "github.com/otfabric/go-modbus-capture" {
-				if d.Replace != nil {
-					return d.Replace.Version
-				}
-				return d.Version
+	return versionOr(moduleVersion("github.com/otfabric/go-modbus-capture"), "unknown")
+}
+
+// LibraryVersion returns the version of go-modbus-trace linked in, as the
+// build records it: the module version in a program that depends on it,
+// "(devel)" in a build of this module itself. Without build information it
+// is trace.Version.
+func LibraryVersion() string {
+	return versionOr(moduleVersion("github.com/otfabric/go-modbus-trace"), trace.Version)
+}
+
+// versionOr returns v, or fallback when the build recorded no version.
+func versionOr(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
+}
+
+// moduleVersion returns the version of the module at path in the build
+// information, or "" when the build records none.
+func moduleVersion(path string) string {
+	bi, _ := debug.ReadBuildInfo()
+	return buildModuleVersion(bi, path)
+}
+
+func buildModuleVersion(bi *debug.BuildInfo, path string) string {
+	if bi == nil {
+		return ""
+	}
+	if bi.Main.Path == path {
+		return bi.Main.Version
+	}
+	for _, d := range bi.Deps {
+		if d.Path == path {
+			if d.Replace != nil {
+				return d.Replace.Version
 			}
+			return d.Version
 		}
 	}
-	return "unknown"
+	return ""
 }
 
 // spool holds the admitted samples in a temporary file during the pass.
