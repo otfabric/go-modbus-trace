@@ -496,10 +496,7 @@ func (x *exporter) tags(sum *trace.FileSummary) map[string]string {
 
 // CaptureLibraryVersion returns the version of go-modbus-capture linked in.
 func CaptureLibraryVersion() string {
-	if v := moduleVersion("github.com/otfabric/go-modbus-capture"); v != "" {
-		return v
-	}
-	return "unknown"
+	return versionOr(moduleVersion("github.com/otfabric/go-modbus-capture"), "unknown")
 }
 
 // LibraryVersion returns the version of go-modbus-trace linked in, as the
@@ -507,17 +504,26 @@ func CaptureLibraryVersion() string {
 // "(devel)" in a build of this module itself. Without build information it
 // is trace.Version.
 func LibraryVersion() string {
-	if v := moduleVersion("github.com/otfabric/go-modbus-trace"); v != "" {
-		return v
+	return versionOr(moduleVersion("github.com/otfabric/go-modbus-trace"), trace.Version)
+}
+
+// versionOr returns v, or fallback when the build recorded no version.
+func versionOr(v, fallback string) string {
+	if v == "" {
+		return fallback
 	}
-	return trace.Version
+	return v
 }
 
 // moduleVersion returns the version of the module at path in the build
 // information, or "" when the build records none.
 func moduleVersion(path string) string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
+	bi, _ := debug.ReadBuildInfo()
+	return buildModuleVersion(bi, path)
+}
+
+func buildModuleVersion(bi *debug.BuildInfo, path string) string {
+	if bi == nil {
 		return ""
 	}
 	if bi.Main.Path == path {
