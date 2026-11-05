@@ -64,7 +64,7 @@ Written next to the capture on request (`--report report.json`) and returned by 
 {
   "schema_version": 1,
   "library": "go-modbus-trace v0.5.1",
-  "capture_library": "go-modbus-capture 0.0.2",
+  "capture_library": "go-modbus-capture v0.1.0",
   "format": "MBCAP draft 0.1",
   "inputs": [{"file": "site.pcapng", "sha256": "...", "packets": 1830211, "first": "...", "last": "..."}],
   "selection": "unit=1,2; from=0s",
