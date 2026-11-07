@@ -75,8 +75,9 @@ coverage-pkg-check: coverage ## Fail when a package is below COVER_PKG_MIN
 check: fmt fmt-check mod-check lint lint-ci vet vuln test coverage-pkg-check targets docs-check ## Format, lint, vet, vuln, test, cross-build and check the docs
 
 # The documents against the code (DOC-008): docsync, as docs-check.yml runs it.
-docs-check: ## Check that the documents agree with the code (docsync)
+docs-check: ## Check that the documents agree with the code (docsync), library and cmd/mbtracectl
 	@go run github.com/otfabric/docsync@$(DOCSYNC_VERSION) check .
+	@cd cmd/mbtracectl && go run github.com/otfabric/docsync@$(DOCSYNC_VERSION) check .
 
 test: ## Run unit tests (race detector)
 	@echo "Running go test -race ./..."
