@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.7.2
+
+**Date:** 2026-11-08
+**Previous release:** v0.7.1
+
+### Changed
+
+- `mbtracectl` is built with the latest Go 1.26 patch release; v0.7.1 was built with go1.26.0.
+
+---
+
 ## v0.7.1
 
 **Date:** 2026-11-07
