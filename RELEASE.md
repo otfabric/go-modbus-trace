@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.7.1
+
+**Date:** 2026-11-07
+**Previous release:** v0.7.0
+
+### Changed
+
+- `mbtracectl` is built on v0.7.0 and go-modbus-capture v0.2.0. Library code is the same as v0.7.0.
+
+---
+
 ## v0.7.0
 
 **Date:** 2026-11-07
