@@ -2,7 +2,7 @@
 
 ## v0.6.0
 
-**Date:** unreleased
+**Date:** 2026-11-07
 **Previous release:** v0.5.2
 
 ### Breaking
