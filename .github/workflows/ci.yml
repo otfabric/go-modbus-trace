@@ -31,7 +31,7 @@ jobs:
       test-exclude-regex: "/example(s)?($|/)"
       codecov-name: go-modbus-trace
       go-versions: '["1.26", "1.27"]'
-      policy-version: v1.4.1
+      policy-version: v1.4.2
     secrets: inherit
 
   # The CLI is a nested module (ADR-0009).
@@ -43,7 +43,7 @@ jobs:
       test-exclude-regex: "/example(s)?($|/)"
       run-codecov: false
       go-versions: '["1.26", "1.27"]'
-      policy-version: v1.4.1
+      policy-version: v1.4.2
     secrets: inherit
 
   # Every target of REQUIREMENTS.md "Programs" builds and tests with
