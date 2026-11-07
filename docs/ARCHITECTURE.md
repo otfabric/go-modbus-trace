@@ -150,7 +150,7 @@ Per connection, with roles known:
 
 ## 10. Event model and provenance (`model`)
 
-*(L2: implemented.)* The types are in package `model` with JSON tags; `docs/schema/event-1.schema.json` (draft 2020-12) is their published form, and tests validate real events against it and check by reflection that every JSON field of `model` (and of `mbtcp.View`, `Field`, `Range`) is in the schema. The schema is authoritative; the sketch below is the original design. Differences: endpoints are `netip.AddrPort`; times are `*time.Time` (absent without a timestamp); ADU PDUs are hex in JSON (`Options.OmitPDU` drops them); `FrameRef.PayOff` is `-1` after IP reassembly; connections are client/server with directions `c2s`/`s2c`; `Transaction` carries `Class`, `Ranges` and `Summary`; `EventSemanticsVersion` is 1.
+*(L2: implemented.)* The types are in package `model` with JSON tags; `docs/schema/event-1.schema.json` (draft 2020-12) is their published form, and tests validate real events against it and check by reflection that every JSON field of `model` (and of `mbtcp.View`, `Field`, `Range`) is in the schema. The schema is authoritative; the sketch below is the original design. Differences: endpoints are `netip.AddrPort`; times are `*time.Time` (absent without a timestamp); ADU PDUs are hex in JSON (`Options.OmitPDU` drops them); `FrameRef.PayOff` is `-1` after IP reassembly; connections are client/server with directions `c2s`/`s2c`, and `Connection.Packets` and `Connection.Bytes` are `[2]uint64` (client to server, then server to client); `Transaction.LatencyNS` is the latency in nanoseconds; `Transaction` carries `Class`, `Ranges` and `Summary`; `EventSemanticsVersion` is 1.
 
 ```go
 type Endpoint struct { Addr netip.Addr; Port uint16 }
@@ -227,8 +227,8 @@ sum, err = trace.Analyze(ctx, f, opts, sink)                 // pass 2; sink get
 frames, err := f.Frames(txn.Request.Refs)                    // random access to provenance
 view := mbtcp.Decode(mbtcp.AsRequest, pdu)                  // display decoding
 rep, err := mbcapexport.Export(ctx, f, opts, mbcapexport.Options{Producer: ..., Selection: sel}, open) // open(header) returns a capture.Writer
-sum, stats, err := timeline.Write(ctx, f, opts, w, timeline.Options{Format: timeline.CSV, Selection: sel})
-stats, err := subtrace.Extract(ctx, f, opts.ScanOptions, subtrace.Options{Selection: sel, Tool: ...}, w) // pcapng
+sum, tstats, err := timeline.Write(ctx, f, opts, w, timeline.Options{Format: timeline.CSV, Selection: sel})
+xstats, err := subtrace.Extract(ctx, f, opts.ScanOptions, subtrace.Options{Selection: sel, Tool: ...}, w) // pcapng
 err = trace.Walk(ctx, f, opts.ScanOptions, fn)              // every raw packet with its connection ID
 ```
 
