@@ -1,4 +1,4 @@
-.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets static fuzz soak golden bench tools replay build check clean coverage-check cross e2e interop coverage-pkg-check
+.PHONY: help all test coverage cover lint lint-ci vuln fmt fmt-check vet mod-check targets static fuzz soak golden bench tools replay build check clean coverage-check cross e2e interop coverage-pkg-check docs-check
 
 # Prefer module-local dependency resolution when a sibling go.work exists.
 export GOWORK := off
@@ -44,6 +44,9 @@ FUZZ_TARGETS = ./internal/pcapio:FuzzPcapReader ./internal/pcapio:FuzzPcapngRead
 MBCAPCTL_VERSION  = v0.0.2
 MODBUSCTL_VERSION = v0.0.0-20261015074520-c75d3676a93c
 
+# docsync release of docs-check (DOC-008).
+DOCSYNC_VERSION := v0.2.0
+
 # Size of the generated stream in `make soak`, GiB.
 SOAK_GIB ?= 5
 
@@ -69,7 +72,11 @@ coverage-pkg-check: coverage ## Fail when a package is below COVER_PKG_MIN
 	END { for (k in n) { p = k; sub(/\/[^\/]*$$/, "", p); s[p] += n[k]; if (k in h) c[p] += n[k] } \
 	for (p in s) { v = 100 * c[p] / s[p]; if (v < m) { printf "%s: %.1f%% < %s%%\n", p, v, m; bad = 1 } } exit bad }' coverage.out
 
-check: fmt fmt-check mod-check lint lint-ci vet vuln test coverage-pkg-check targets ## Format, lint, vet, vuln, test and cross-build
+check: fmt fmt-check mod-check lint lint-ci vet vuln test coverage-pkg-check targets docs-check ## Format, lint, vet, vuln, test, cross-build and check the docs
+
+# The documents against the code (DOC-008): docsync, as docs-check.yml runs it.
+docs-check: ## Check that the documents agree with the code (docsync)
+	@go run github.com/otfabric/docsync@$(DOCSYNC_VERSION) check .
 
 test: ## Run unit tests (race detector)
 	@echo "Running go test -race ./..."
