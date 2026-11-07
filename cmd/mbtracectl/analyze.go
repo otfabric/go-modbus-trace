@@ -218,6 +218,7 @@ func summaryCommand(e *env) *cobra.Command {
 				}
 				return all.Event(ev)
 			}))
+			aerr = inputErr(aerr)
 			if sum == nil {
 				return aerr
 			}
@@ -369,6 +370,7 @@ func runTimeline(cmd *cobra.Command, e *env, af *analyzeFlags, sf *selFlags, ins
 		return usageErr("--format %q: text, csv or jsonl", format)
 	}
 	_, st, err := timeline.Write(cmd.Context(), f, o, w, to)
+	err = inputErr(err)
 	if err == nil && st.Late > 0 { // a warning, on stderr whether or not it is a terminal
 		_, _ = fmt.Fprintf(e.stderr, "%d events came later than the reorder window and were written out of order\n", st.Late)
 	}
@@ -393,6 +395,7 @@ func textTimeline(cmd *cobra.Command, e *env, f *trace.File, o trace.Options, se
 			t.Status, lat, t.Summary, strings.Join(t.Flags, ","))
 		return err
 	}))
+	err = inputErr(err)
 	if ferr := tw.Flush(); err == nil {
 		err = ferr
 	}
@@ -401,7 +404,13 @@ func textTimeline(cmd *cobra.Command, e *env, f *trace.File, o trace.Options, se
 }
 
 func exportCommand(e *env) *cobra.Command {
-	cmd := &cobra.Command{Use: "export", Short: "Export a trace: MBCAP for replay, or the timeline"}
+	cmd := &cobra.Command{Use: "export", Short: "Export a trace: MBCAP for replay, or the timeline", Args: cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, a []string) error {
+			if len(a) > 0 {
+				return usageErr("unknown command %q for %q", a[0], cmd.CommandPath())
+			}
+			return cmd.Help()
+		}}
 	var (
 		af          analyzeFlags
 		sf          selFlags
@@ -463,15 +472,15 @@ func safeWriteAll(e *env, ins []string, out string, write func(io.Writer) error)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(out), "."+filepath.Base(out)+".*.tmp")
 	if err != nil {
-		return err
+		return outputErr(err)
 	}
 	defer func() { _ = os.Remove(tmp.Name()) }()
-	if err := write(tmp); err != nil {
+	if err := write(outWriter{tmp}); err != nil {
 		_ = tmp.Close()
 		return err
 	}
 	if err := tmp.Close(); err != nil {
-		return err
+		return outputErr(err)
 	}
-	return os.Rename(tmp.Name(), out)
+	return outputErr(os.Rename(tmp.Name(), out))
 }

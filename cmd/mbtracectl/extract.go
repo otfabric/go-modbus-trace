@@ -51,7 +51,7 @@ comment naming the selection. Select with --conn (IDs as flows lists them),
 			err = safeWriteAll(e, a, out, func(w io.Writer) error {
 				var err error
 				st, err = subtrace.Extract(cmd.Context(), f, o.ScanOptions, subtrace.Options{Selection: sel, Tool: "mbtracectl " + version}, w)
-				return err
+				return inputErr(err)
 			})
 			if err != nil {
 				return err
