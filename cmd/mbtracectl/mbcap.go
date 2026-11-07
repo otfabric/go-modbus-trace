@@ -116,7 +116,7 @@ output name (.mbcap, .mbcap.jsonl or .jsonl, .mbcap.csv or .csv) or --format.`,
 			if err != nil {
 				return err
 			}
-			eo := mbcapexport.Options{Producer: "mbtracectl " + version, Step: step(cmd), TickNS: tick, ChangeOnly: changeOnly,
+			eo := mbcapexport.Options{Producer: "mbtracectl " + toolVersion(), Step: step(cmd), TickNS: tick, ChangeOnly: changeOnly,
 				NoExceptions: noExceptions, Selection: sel, Names: map[string]string{}}
 			for _, n := range names {
 				k, label, ok := strings.Cut(n, "=")
@@ -191,7 +191,7 @@ output name (.mbcap, .mbcap.jsonl or .jsonl, .mbcap.csv or .csv) or --format.`,
 
 // step is the provenance step: the command and its flags, no file names.
 func step(cmd *cobra.Command) string {
-	parts := []string{"mbtracectl " + version, "export mbcap"}
+	parts := []string{"mbtracectl " + toolVersion(), "export mbcap"}
 	cmd.Flags().Visit(func(f *pflag.Flag) {
 		switch f.Name {
 		case "output", "report":

@@ -18,15 +18,24 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
+	"github.com/otfabric/go-modbus-trace/cmd/mbtracectl/internal/buildinfo"
 )
 
-// Set by the linker (see Makefile).
+// Set by the linker (see Makefile and .github/workflows/release.yml); empty
+// when not injected, and then resolved by buildinfo.
 var (
-	version   = "0.0.0-dev"
+	version   = ""
 	tag       = ""
-	commit    = "unknown"
-	buildDate = "unknown"
+	commit    = ""
+	buildDate = ""
 )
+
+// build is the resolved build information of this binary.
+func build() buildinfo.Info { return buildinfo.Resolve("mbtracectl", version, tag, commit, buildDate) }
+
+// toolVersion is the version written into the provenance of output files.
+func toolVersion() string { return build().Version }
 
 // Exit codes (docs/exitcodes.md): the organisation table. No command
 // completes with a result that reports problems, so 1 (findings) is not
@@ -114,6 +123,7 @@ MBTRACECTL_SERVER_PORT=502,1502). A flag on the command line wins.`,
 	root.PersistentFlags().BoolVar(&e.json, "json", false, "write JSON (docs/json-output.md) instead of text")
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageErr("%v", err) })
 	root.AddCommand(infoCommand(e), flowsCommand(e), summaryCommand(e), timelineCommand(e), exportCommand(e), extractCommand(e), versionCommand(e))
+	registerCompletions(root)
 	return root
 }
 
@@ -147,25 +157,20 @@ func args(lo, hi int) cobra.PositionalArgs {
 	}
 }
 
-// versionDoc is the JSON form of version (docs/schema/version-1.schema.json).
-type versionDoc struct {
-	SchemaVersion int    `json:"schema_version"`
-	Version       string `json:"version"`
-	Tag           string `json:"tag"`
-	Commit        string `json:"commit"`
-	BuildDate     string `json:"build_date"`
-}
-
 func versionCommand(e *env) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print the version",
-		Args:  args(0, 0),
+		Long: `Print the version, tag, commit, build date, Go version and platform on one line,
+or with --json as one line of JSON (docs/schema/version-2.schema.json).`,
+		Args: args(0, 0),
 		RunE: func(*cobra.Command, []string) error {
+			b := build()
+			line := b.String()
 			if e.json {
-				return writeJSON(e.stdout, versionDoc{schemaVersion, version, tag, commit, buildDate})
+				line = b.JSON()
 			}
-			_, err := fmt.Fprintf(e.stdout, "mbtracectl %s (commit %s, built %s)\n", version, commit, buildDate)
+			_, err := fmt.Fprintln(e.stdout, line)
 			return err
 		},
 	}

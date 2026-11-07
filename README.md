@@ -27,6 +27,28 @@ irm https://get.otfabric.io/mbtracectl.ps1 | iex
 
 Linux (amd64, arm64, armv7), macOS (Intel, Apple silicon) and Windows (amd64, arm64). The installer verifies the release's SHA-256 checksum, installs per user without `sudo` (`~/.local/bin`, Windows `%LOCALAPPDATA%\OTFabric\bin`), and upgrades in place when run again. Pin a version with `OTF_VERSION=x.y.z`; for CI, containers and device images use `OTF_UNMANAGED_INSTALL=<dir>`; all options: [otfabric/install](https://github.com/otfabric/install#options). `OTF_VERSION` is the version of go-modbus-trace, which ships `mbtracectl`. For offline machines, the archives and checksums are on [Releases](https://github.com/otfabric/go-modbus-trace/releases).
 
+### Shell completion
+
+The value sets of the flags complete (`--format`, `--order`, `--status`, `--class`, `--flag`, `--compression`), and trace and output arguments complete files of their type.
+
+```sh
+# bash (needs the bash-completion package)
+mkdir -p ~/.local/share/bash-completion/completions
+mbtracectl completion bash > ~/.local/share/bash-completion/completions/mbtracectl
+
+# zsh: a directory on your fpath, then restart the shell
+mkdir -p ~/.zsh/completions && mbtracectl completion zsh > ~/.zsh/completions/_mbtracectl
+# and once in ~/.zshrc:  fpath=(~/.zsh/completions $fpath); autoload -U compinit && compinit
+
+# fish
+mkdir -p ~/.config/fish/completions && mbtracectl completion fish > ~/.config/fish/completions/mbtracectl.fish
+```
+
+```powershell
+# PowerShell: add this line to your profile ($PROFILE)
+mbtracectl completion powershell | Out-String | Invoke-Expression
+```
+
 ### Commands
 
 | Command | What it tells you |
@@ -38,7 +60,7 @@ Linux (amd64, arm64, armv7), macOS (Intel, Apple silicon) and Windows (amd64, ar
 | `export timeline TRACE... -o out.csv\|.jsonl` | the same timeline as a file |
 | `extract TRACE... -o out.pcapng` | the packets of chosen connections, for Wireshark |
 | `export mbcap TRACE... -o out.mbcap` | a capture that `modbusctl` replays as a virtual device, with a report |
-| `version` | version, tag, commit, build date |
+| `version` | version, tag, commit, build date, Go version and platform; `--json` for one line of JSON |
 
 Several files are read as one trace (a ring buffer: `summary ring_*.pcapng`), `-` reads standard input, `--json` gives machine output with a JSON Schema per document ([docs/json-output.md](docs/json-output.md)), every flag can be set as `MBTRACECTL_<FLAG>`, and the exit codes follow the organisation table: 0, 2 usage, 3 invalid input, 10 output, 130 interrupted ([cmd/mbtracectl/docs/exitcodes.md](cmd/mbtracectl/docs/exitcodes.md)).
 

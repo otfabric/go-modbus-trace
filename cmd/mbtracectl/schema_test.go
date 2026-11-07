@@ -11,6 +11,7 @@ import (
 
 	"github.com/santhosh-tekuri/jsonschema/v6"
 
+	"github.com/otfabric/go-modbus-trace/cmd/mbtracectl/internal/buildinfo"
 	"github.com/otfabric/go-modbus-trace/export/mbcapexport"
 	"github.com/otfabric/go-modbus-trace/internal/schemagen"
 	"github.com/otfabric/go-modbus-trace/trace"
@@ -27,7 +28,7 @@ var schemas = []struct {
 	{"summary-1", "mbtracectl summary --json", "The file summary and the analyzers: overview, devices, patterns, coverage.", summaryJSON{}},
 	{"export-report-1", "MBCAP export report", "mbcapexport.Report (MBCAP-EXPORT.md section 5); mbtracectl export mbcap --report and --json.", mbcapexport.Report{}},
 	{"extract-1", "mbtracectl extract --json", "What a sub-trace extraction wrote.", extractDoc{}},
-	{"version-1", "mbtracectl version --json", "The build of mbtracectl.", versionDoc{}},
+	{"version-2", "mbtracectl version --json", "The build of mbtracectl: one line, the key order of the organisation's version contract.", buildinfo.Info{}},
 }
 
 func schemaPath(name string) string {
@@ -103,7 +104,7 @@ func TestJSONOutputValidates(t *testing.T) {
 	validate(t, "info-1", run("info", "--json", path))
 	validate(t, "flows-1", run("flows", "--json", "--all", path))
 	validate(t, "summary-1", run("summary", "--json", path))
-	validate(t, "version-1", run("version", "--json"))
+	validate(t, "version-2", run("version", "--json"))
 	validate(t, "extract-1", run("extract", "--json", path, "-o", filepath.Join(dir, "s.pcapng")))
 	rep := filepath.Join(dir, "r.json")
 	validate(t, "export-report-1", run("export", "mbcap", "--json", path, "-o", filepath.Join(dir, "x.mbcap"), "--report", rep))

@@ -122,5 +122,13 @@ Either end of a connection may match `--server` or `--client`.
 
 ## version
 
-`mbtracectl version`: no flags of its own; with `--json` it writes the
-version, tag, commit and build date as JSON.
+`mbtracectl version`: no flags of its own. It prints one line:
+
+```text
+mbtracectl 0.7.0 (tag v0.7.0, commit 1802d0f9afe8642d1e278120b76fcdfac967cb9e, built 2026-11-05T15:41:49Z, go1.26.0, linux/amd64)
+```
+
+A build that was not released (`go build`, `go install`) prints `dev` or the
+module version, the VCS revision (with `-dirty` for uncommitted changes) and
+leaves out the tag. With `--json` (or `MBTRACECTL_JSON=1`) it writes the same
+as one line of JSON ([version-2](../../../docs/schema/version-2.schema.json)).

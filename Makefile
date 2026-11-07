@@ -15,9 +15,10 @@ GO_CLI     = go -C $(CLI_DIR)
 BIN_DIR    = bin
 BINARY     = $(BIN_DIR)/$(APP_NAME)
 
-VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "0.0.0-dev")
+# version without the leading v, tag with it, the full commit SHA (what the Release workflow injects).
+VERSION    ?= $(patsubst v%,%,$(shell git describe --tags --always --dirty 2>/dev/null || echo dev))
 TAG        ?= $(shell git describe --tags --exact-match 2>/dev/null || echo "")
-COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+COMMIT     ?= $(shell git rev-parse HEAD 2>/dev/null || echo "unknown")
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
 LDFLAGS := -ldflags "-s -w -X 'main.version=$(VERSION)' -X 'main.tag=$(TAG)' -X 'main.commit=$(COMMIT)' -X 'main.buildDate=$(BUILD_DATE)'"

@@ -1,16 +1,22 @@
 {
   "$defs": {
-    "mbtracectl.versionDoc": {
+    "buildinfo.Info": {
       "additionalProperties": false,
       "properties": {
-        "build_date": {
+        "built": {
           "type": "string"
         },
         "commit": {
           "type": "string"
         },
-        "schema_version": {
-          "type": "integer"
+        "go": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
         },
         "tag": {
           "type": "string"
@@ -20,18 +26,20 @@
         }
       },
       "required": [
-        "build_date",
+        "built",
         "commit",
-        "schema_version",
+        "go",
+        "name",
+        "platform",
         "tag",
         "version"
       ],
       "type": "object"
     }
   },
-  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/version-1.schema.json",
-  "$ref": "#/$defs/mbtracectl.versionDoc",
+  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/version-2.schema.json",
+  "$ref": "#/$defs/buildinfo.Info",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "The build of mbtracectl.",
+  "description": "The build of mbtracectl: one line, the key order of the organisation's version contract.",
   "title": "mbtracectl version --json"
 }

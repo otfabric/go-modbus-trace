@@ -1,10 +1,10 @@
 # JSON output
 
 `--json` (or `MBTRACECTL_JSON=1`) makes `mbtracectl` write one indented JSON document to stdout. Every
-document carries `schema_version` (1). Field names are snake_case and stable; a change is called out in the
+document carries `schema_version` (1), except `version`, which follows the organisation's version format. Field names are snake_case and stable; a change is called out in the
 release notes. Times are RFC 3339 with nanoseconds, UTC. Endpoints are `ip:port` (IPv6 in brackets).
 Each document has a JSON Schema in [`schema/`](schema/) (draft 2020-12): `info-1`, `flows-1`, `summary-1`,
-`export-report-1`, `extract-1`, `version-1`, and `file-summary-1` for the library's `trace.FileSummary`. They
+`export-report-1`, `extract-1`, `version-2`, and `file-summary-1` for the library's `trace.FileSummary`. They
 are generated from the Go types (`make golden`); a test fails when one is out of date and validates the real
 output of every command against its schema.
 
@@ -62,8 +62,11 @@ The meaning of every counter is in `ARCHITECTURE.md` sections 4 to 7 and 11.
 
 ## `version`
 
+One line, the keys always present in this order; `tag` is `""` for a build that was not released, and
+`version` is `dev`, `commit` and `built` `unknown` when they are not known:
+
 ```json
-{"schema_version": 1, "version": "0.1.0", "tag": "v0.1.0", "commit": "...", "build_date": "..."}
+{"name":"mbtracectl","version":"0.7.0","tag":"v0.7.0","commit":"1802d0f9afe8642d1e278120b76fcdfac967cb9e","built":"2026-11-05T15:41:49Z","go":"go1.26.0","platform":"linux/amd64"}
 ```
 
 ## `summary`
