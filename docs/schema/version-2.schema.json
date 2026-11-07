@@ -1,0 +1,75 @@
+{
+  "$defs": {
+    "buildinfo.Info": {
+      "additionalProperties": false,
+      "properties": {
+        "built": {
+          "type": "string"
+        },
+        "commit": {
+          "type": "string"
+        },
+        "go": {
+          "type": "string"
+        },
+        "libraries": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/buildinfo.Library"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "platform": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "built",
+        "commit",
+        "go",
+        "libraries",
+        "name",
+        "platform",
+        "tag",
+        "version"
+      ],
+      "type": "object"
+    },
+    "buildinfo.Library": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://github.com/otfabric/go-modbus-trace/docs/schema/version-2.schema.json",
+  "$ref": "#/$defs/buildinfo.Info",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "The build of mbtracectl: one line, the key order of the organisation's version contract.",
+  "title": "mbtracectl version --json"
+}

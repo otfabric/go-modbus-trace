@@ -246,7 +246,8 @@ mbtracectl export mbcap     <trace>... -o out.mbcap [selection flags] [--change-
                             [--warn-replay-memory 1GiB]
 mbtracectl export timeline  <trace>... -o out.csv|out.jsonl [selection flags]
 mbtracectl extract   <trace>... -o sub.pcapng [--server] [--client] [--conn] [--from/--to]
-mbtracectl version
+mbtracectl version   [--json]
+mbtracectl completion bash|zsh|fish|powershell
 selection flags: --server ip[:port]  --unit 1,2  --client ip  --conn 12  --fc 3,4,43  --status ok,exception
                  --class read  --flag midstream  --no-flag uncertain  --range holding:4096-4200
                  --from 10m --to 1h (offsets from the first packet) | --from-time/--to-time (RFC 3339)

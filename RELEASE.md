@@ -1,5 +1,25 @@
 # go-modbus-trace Releases
 
+## v0.7.0
+
+**Date:** 2026-11-07
+**Previous release:** v0.6.0
+
+### Breaking
+
+- `mbtracectl version --json` writes the organisation's version document on one line: `{"name","version","tag","commit","built","libraries","go","platform"}` in that order (schema [version-2](docs/schema/version-2.schema.json), replacing version-1). `schema_version` and `build_date` are gone; `built` replaces `build_date`. Library code is unchanged.
+
+### Added
+
+- `mbtracectl version` prints one line with the tag, the full commit, the build date, the Go version and the platform: `mbtracectl 0.7.0 (tag v0.7.0, commit <sha>, built <date>, go-modbus-capture 0.1.0, go1.26.0, linux/amd64)`, with the OT Fabric libraries it is built on. A build that was not released reports `dev` (or the module version of `go install ...@vX.Y.Z`) and the VCS revision, with `-dirty` for uncommitted changes, instead of `0.0.0-dev`; `make build` injects the version and tag only when HEAD is on a tag.
+- Shell completion for bash, zsh, fish and PowerShell completes the value sets of `--format`, `--order`, `--status`, `--class`, `--flag`, `--no-flag` and `--compression`, trace arguments (`.pcap`, `.pcapng`, `.cap`, `.gz`), and output files by type (`extract -o` pcapng, `export mbcap -o` mbcap/jsonl/csv, `--report` json); flags with free values no longer offer file names. Install: [Shell completion](README.md#shell-completion).
+
+### Changed
+
+- `make build` injects the version without the leading `v` (only on a tag) and the full commit SHA, as the Release workflow does.
+
+---
+
 ## v0.6.0
 
 **Date:** 2026-11-07
