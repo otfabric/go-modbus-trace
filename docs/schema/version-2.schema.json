@@ -12,6 +12,19 @@
         "go": {
           "type": "string"
         },
+        "libraries": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/buildinfo.Library"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "name": {
           "type": "string"
         },
@@ -29,9 +42,26 @@
         "built",
         "commit",
         "go",
+        "libraries",
         "name",
         "platform",
         "tag",
+        "version"
+      ],
+      "type": "object"
+    },
+    "buildinfo.Library": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
         "version"
       ],
       "type": "object"

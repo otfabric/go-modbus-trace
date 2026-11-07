@@ -32,7 +32,9 @@ var (
 )
 
 // build is the resolved build information of this binary.
-func build() buildinfo.Info { return buildinfo.Resolve("mbtracectl", version, tag, commit, buildDate) }
+func build() buildinfo.Info {
+	return buildinfo.Resolve("mbtracectl", version, tag, commit, buildDate, "github.com/otfabric/go-modbus-trace")
+}
 
 // toolVersion is the version written into the provenance of output files.
 func toolVersion() string { return build().Version }

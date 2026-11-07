@@ -63,10 +63,11 @@ The meaning of every counter is in `ARCHITECTURE.md` sections 4 to 7 and 11.
 ## `version`
 
 One line, the keys always present in this order; `tag` is `""` for a build that was not released, and
-`version` is `dev`, `commit` and `built` `unknown` when they are not known:
+`version` is `dev`, `commit` and `built` `unknown` when they are not known; `libraries` are the OT Fabric
+libraries linked in besides go-modbus-trace (`[]` when none):
 
 ```json
-{"name":"mbtracectl","version":"0.7.0","tag":"v0.7.0","commit":"1802d0f9afe8642d1e278120b76fcdfac967cb9e","built":"2026-11-05T15:41:49Z","go":"go1.26.0","platform":"linux/amd64"}
+{"name":"mbtracectl","version":"0.7.0","tag":"v0.7.0","commit":"1802d0f9afe8642d1e278120b76fcdfac967cb9e","built":"2026-11-05T15:41:49Z","libraries":[{"name":"go-modbus-capture","version":"0.1.0"}],"go":"go1.26.0","platform":"linux/amd64"}
 ```
 
 ## `summary`

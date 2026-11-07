@@ -3,6 +3,7 @@
 package main
 
 import (
+	"encoding/json"
 	"runtime"
 	"slices"
 	"strings"
@@ -114,12 +115,12 @@ func TestEveryFlagCompletes(t *testing.T) {
 
 func TestVersionOutput(t *testing.T) {
 	code, out, _ := cli(t, nil, "version")
-	want := "mbtracectl dev (commit unknown, built unknown, " + runtime.Version() + ", " + runtime.GOOS + "/" + runtime.GOARCH + ")\n"
+	want := "mbtracectl dev (commit unknown, built unknown, " + libsText() + runtime.Version() + ", " + runtime.GOOS + "/" + runtime.GOARCH + ")\n"
 	if code != exitOK || out != want {
 		t.Errorf("version: exit %d %q, want %q", code, out, want)
 	}
 	code, out, _ = cli(t, nil, "version", "--json")
-	want = `{"name":"mbtracectl","version":"dev","tag":"","commit":"unknown","built":"unknown","go":"` + runtime.Version() + `","platform":"` + runtime.GOOS + "/" + runtime.GOARCH + "\"}\n"
+	want = `{"name":"mbtracectl","version":"dev","tag":"","commit":"unknown","built":"unknown",` + libsJSON() + `"go":"` + runtime.Version() + `","platform":"` + runtime.GOOS + "/" + runtime.GOARCH + "\"}\n"
 	if code != exitOK || out != want {
 		t.Errorf("version --json: exit %d %q, want %q", code, out, want)
 	}
@@ -134,9 +135,24 @@ func TestVersionInjected(t *testing.T) {
 	t.Cleanup(func() { version, tag, commit, buildDate = old[0], old[1], old[2], old[3] })
 	version, tag, commit, buildDate = "0.7.0", "v0.7.0", "1802d0f9afe8642d1e278120b76fcdfac967cb9e", "2026-11-05T15:41:49Z"
 	_, out, _ := cli(t, nil, "version")
-	want := "mbtracectl 0.7.0 (tag v0.7.0, commit 1802d0f9afe8642d1e278120b76fcdfac967cb9e, built 2026-11-05T15:41:49Z, " +
+	want := "mbtracectl 0.7.0 (tag v0.7.0, commit 1802d0f9afe8642d1e278120b76fcdfac967cb9e, built 2026-11-05T15:41:49Z, " + libsText() +
 		runtime.Version() + ", " + runtime.GOOS + "/" + runtime.GOARCH + ")\n"
 	if out != want {
 		t.Errorf("got %q, want %q", out, want)
 	}
+}
+
+// libsText and libsJSON are the libraries part of the version output of
+// this test binary (whatever OT Fabric modules it links).
+func libsText() string {
+	s := ""
+	for _, l := range build().Libraries {
+		s += l.Name + " " + l.Version + ", "
+	}
+	return s
+}
+
+func libsJSON() string {
+	b, _ := json.Marshal(build().Libraries)
+	return `"libraries":` + string(b) + `,`
 }
