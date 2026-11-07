@@ -3,7 +3,6 @@
     {"rule": "DS-SIG", "subject": "Endpoint", "reason": "docs/ARCHITECTURE.md section 10 keeps the original design sketch on purpose; the text above it lists the differences (endpoints are netip.AddrPort) and names the schema and docs/api as authoritative"},
     {"rule": "DS-SIG", "subject": "Connection.BytesC2S", "reason": "original design sketch in docs/ARCHITECTURE.md section 10; the implemented field is Connection.Bytes ([2]uint64), stated in the differences above the sketch"},
     {"rule": "DS-SIG", "subject": "Connection.BytesS2C", "reason": "original design sketch in docs/ARCHITECTURE.md section 10; the implemented field is Connection.Bytes ([2]uint64), stated in the differences above the sketch"},
-    {"rule": "DS-SIG", "subject": "Transaction.Latency", "reason": "original design sketch in docs/ARCHITECTURE.md section 10; the implemented field is Transaction.LatencyNS, stated in the differences above the sketch"},
-    {"rule": "DS-VER", "subject": "go-modbus v1.7.1", "reason": "dated milestone record (L2 outcome, 2026-10-15) of the go-modbus version LA6 was verified with at the time; not a statement about the current requirement"}
+    {"rule": "DS-SIG", "subject": "Transaction.Latency", "reason": "original design sketch in docs/ARCHITECTURE.md section 10; the implemented field is Transaction.LatencyNS, stated in the differences above the sketch"}
   ]
 }
