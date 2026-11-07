@@ -17,4 +17,4 @@ The sentinels this module exports. Test them with `errors.Is`. A malformed packe
 
 `trace.InternalError` is not an error value: it is a record in the summary of a panic recovered while decoding one packet. This is a bug, so please report it.
 
-`mbtracectl` exit codes: [docs/exitcodes.md](docs/exitcodes.md).
+`mbtracectl` exit codes: [cmd/mbtracectl/docs/exitcodes.md](cmd/mbtracectl/docs/exitcodes.md).

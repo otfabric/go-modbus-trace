@@ -32,7 +32,7 @@ make build   # ./bin/mbtracectl
 | `export mbcap TRACE... -o out.mbcap` | a capture that `modbusctl` replays as a virtual device, with a report |
 | `version` | version, tag, commit, build date |
 
-Several files are read as one trace (a ring buffer: `summary ring_*.pcapng`), `-` reads standard input, `--json` gives machine output with a JSON Schema per document ([docs/json-output.md](docs/json-output.md)), every flag can be set as `MBTRACECTL_<FLAG>`, and the exit codes are 0, 1 and 2 ([docs/exitcodes.md](docs/exitcodes.md)).
+Several files are read as one trace (a ring buffer: `summary ring_*.pcapng`), `-` reads standard input, `--json` gives machine output with a JSON Schema per document ([docs/json-output.md](docs/json-output.md)), every flag can be set as `MBTRACECTL_<FLAG>`, and the exit codes are 0, 1 and 2 ([cmd/mbtracectl/docs/exitcodes.md](cmd/mbtracectl/docs/exitcodes.md)).
 
 ### Recipes
 
