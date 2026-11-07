@@ -15,11 +15,19 @@ Offline only: the library never captures live and never sends anything. Pure Go,
 
 ## mbtracectl
 
-Download a binary from the [releases](https://github.com/otfabric/go-modbus-trace/releases) (Linux amd64, arm64 and armv7, macOS, Windows; static, no libpcap), or build it from a checkout (the CLI is a nested module, so the library does not depend on cobra):
+### Install mbtracectl
 
 ```sh
-make build   # ./bin/mbtracectl
+curl -fsSL https://get.otfabric.io/mbtracectl | sh
 ```
+
+```powershell
+irm https://get.otfabric.io/mbtracectl.ps1 | iex
+```
+
+Linux (amd64, arm64, armv7), macOS (Intel, Apple silicon) and Windows (amd64, arm64). The installer verifies the release's SHA-256 checksum, installs per user without `sudo` (`~/.local/bin`, Windows `%LOCALAPPDATA%\OTFabric\bin`), and upgrades in place when run again. Pin a version with `OTF_VERSION=x.y.z`; for CI, containers and device images use `OTF_UNMANAGED_INSTALL=<dir>`; all options: [otfabric/install](https://github.com/otfabric/install#options). `OTF_VERSION` is the version of go-modbus-trace, which ships `mbtracectl`. For offline machines, the archives and checksums are on [Releases](https://github.com/otfabric/go-modbus-trace/releases).
+
+### Commands
 
 | Command | What it tells you |
 |---|---|

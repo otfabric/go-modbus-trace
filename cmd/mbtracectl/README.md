@@ -6,8 +6,8 @@ never captures live and never sends anything: the trace is its only input. It
 is a nested module of [go-modbus-trace](../../README.md), so the library does
 not depend on cobra.
 
-Download a binary from the
-[releases](https://github.com/otfabric/go-modbus-trace/releases), or build it
+Install it with the one-line installer: see
+[Install mbtracectl](../../README.md#install-mbtracectl). Contributors build it
 from a checkout of go-modbus-trace with `make build` (`./bin/mbtracectl`).
 
 | Command | What it does |
