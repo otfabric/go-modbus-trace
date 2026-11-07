@@ -32,7 +32,8 @@ func openInputs(e *env, args []string) (*trace.File, error) {
 	if slices.Contains(args, "-") {
 		return nil, usageErr("standard input (-) cannot be combined with other inputs")
 	}
-	return trace.OpenFiles(args...)
+	f, err := trace.OpenFiles(args...)
+	return f, inputErr(err)
 }
 
 var sizeRE = regexp.MustCompile(`^(\d+)\s*(B|KiB|MiB|GiB|TiB|KB|MB|GB|TB)?$`)
@@ -152,7 +153,7 @@ output name (.mbcap, .mbcap.jsonl or .jsonl, .mbcap.csv or .csv) or --format.`,
 						return jsonl.NewWriter(w, h)
 					}
 				})
-				return err
+				return inputErr(err)
 			})
 			if err != nil {
 				return err

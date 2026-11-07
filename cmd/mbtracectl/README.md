@@ -31,7 +31,8 @@ of every command are in [docs/commands.md](docs/commands.md).
 Every flag can also be set by an environment variable: `MBTRACECTL_` and the
 flag name in capitals with dashes as underscores (`MBTRACECTL_JSON=1`,
 `MBTRACECTL_SERVER_PORT=502,1502`); a flag on the command line wins. The exit
-codes are in [docs/exitcodes.md](docs/exitcodes.md).
+codes follow the organisation table: 0 success, 2 usage, 3 invalid input, 10
+output or internal error, 130 interrupted ([docs/exitcodes.md](docs/exitcodes.md)).
 
 ## Examples
 

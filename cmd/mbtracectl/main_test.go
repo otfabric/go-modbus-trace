@@ -7,12 +7,18 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/otfabric/go-modbus-trace/export/mbcapexport"
+	"github.com/otfabric/go-modbus-trace/export/subtrace"
+	"github.com/otfabric/go-modbus-trace/export/timeline"
+	"github.com/otfabric/go-modbus-trace/trace"
 	"github.com/otfabric/go-modbus-trace/trace/tracetest"
 )
 
@@ -108,13 +114,27 @@ func TestExitCodes(t *testing.T) {
 		{"too many arguments", []string{"version", "extra"}, nil, exitUsage},
 		{"bad endpoint", []string{"flows", "--server", "not-an-ip", path}, nil, exitUsage},
 		{"bad score", []string{"flows", "--min-score", "2", path}, nil, exitUsage},
-		{"missing file", []string{"info", "/nonexistent/x.pcap"}, nil, exitError},
-		{"not a trace", []string{"info", "-"}, []byte("hello, world"), exitError},
-		{"damaged trace: results and an error", []string{"info", "-"}, damage(data), exitError},
+		{"unknown command", []string{"nope"}, nil, exitUsage},
+		{"unknown export", []string{"export", "nope"}, nil, exitUsage},
+		{"export alone", []string{"export"}, nil, exitOK},                  // help
+		{"bad environment value", []string{"flows", path}, nil, exitUsage}, // set below
+		{"stdin with other inputs", []string{"summary", "-", path}, nil, exitUsage},
+		{"output is an input", []string{"export", "timeline", path, "-o", path, "--format", "csv"}, nil, exitUsage},
+		{"missing file", []string{"info", "/nonexistent/x.pcap"}, nil, exitInvalidInput},
+		{"a directory", []string{"summary", filepath.Dir(path)}, nil, exitInvalidInput},
+		{"not a trace", []string{"info", "-"}, []byte("hello, world"), exitInvalidInput},
+		{"damaged trace: results and an error", []string{"info", "-"}, damage(data), exitInvalidInput},
+		{"damaged trace: timeline", []string{"timeline", "-"}, damage(data), exitInvalidInput},
+		{"damaged trace: export", []string{"export", "mbcap", "-", "-o", filepath.Join(t.TempDir(), "x.mbcap")}, damage(data), exitInvalidInput},
+		{"damaged trace: extract", []string{"extract", "-", "-o", filepath.Join(t.TempDir(), "x.pcapng")}, damage(data), exitInvalidInput},
+		{"output directory missing", []string{"export", "mbcap", path, "-o", "/nonexistent/x.mbcap"}, nil, exitInternal},
 		{"version", []string{"version"}, nil, exitOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.name == "bad environment value" {
+				t.Setenv("MBTRACECTL_MIN_SCORE", "high")
+			}
 			if code, _, errs := cli(t, tc.in, tc.args...); code != tc.code {
 				t.Errorf("exit %d, want %d (stderr %q)", code, tc.code, errs)
 			}
@@ -222,7 +242,7 @@ func TestExportTimeline(t *testing.T) {
 	}
 	// A failure leaves no partial output, and no temporary file.
 	bad := filepath.Join(dir, "bad.jsonl")
-	if code, _, _ := cli(t, []byte("not a trace at all"), "export", "timeline", "-", "-o", bad); code != exitError {
+	if code, _, _ := cli(t, []byte("not a trace at all"), "export", "timeline", "-", "-o", bad); code != exitInvalidInput {
 		t.Errorf("bad input: exit %d", code)
 	}
 	entries, _ := os.ReadDir(dir)
@@ -300,7 +320,7 @@ func TestExportMBCAP(t *testing.T) {
 		}
 	}
 	// A failure leaves no output behind.
-	if code, _, _ := cli(t, []byte("garbage"), "export", "mbcap", "-", "-o", filepath.Join(dir, "bad.mbcap")); code != exitError {
+	if code, _, _ := cli(t, []byte("garbage"), "export", "mbcap", "-", "-o", filepath.Join(dir, "bad.mbcap")); code != exitInvalidInput {
 		t.Errorf("garbage: exit %d", code)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "bad.mbcap")); err == nil {
@@ -352,7 +372,7 @@ func TestBadFlags(t *testing.T) {
 	}
 }
 
-// Missing inputs are failures of the run in every command, not usage errors.
+// Missing inputs are invalid input in every command, not usage errors.
 func TestMissingInput(t *testing.T) {
 	missing := "/nonexistent/x.pcap"
 	out := filepath.Join(t.TempDir(), "o.pcapng")
@@ -362,8 +382,8 @@ func TestMissingInput(t *testing.T) {
 		{"timeline", missing},
 		{"extract", "-o", out, missing},
 	} {
-		if code, _, _ := cli(t, nil, args...); code != exitError {
-			t.Errorf("%v: exit %d, want %d", args, code, exitError)
+		if code, _, _ := cli(t, nil, args...); code != exitInvalidInput {
+			t.Errorf("%v: exit %d, want %d", args, code, exitInvalidInput)
 		}
 	}
 	if _, err := os.Stat(out); err == nil {
@@ -398,5 +418,57 @@ func TestProgress(t *testing.T) {
 	code := run(context.Background(), []string{"flows", path}, strings.NewReader(""), &stdout, &stderr, true)
 	if code != exitOK || stdout.String() != want {
 		t.Fatalf("exit %d, stdout:\n%s", code, stdout.String())
+	}
+}
+
+// TestExitInterrupted: a command stopped by SIGINT or SIGTERM (a cancelled
+// context) exits 130 and says why on stderr.
+func TestExitInterrupted(t *testing.T) {
+	path, _ := fixture(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for _, args := range [][]string{{"summary", path}, {"export", "mbcap", path, "-o", filepath.Join(t.TempDir(), "x.mbcap")}} {
+		var out, errw bytes.Buffer
+		if code := run(ctx, args, bytes.NewReader(nil), &out, &errw, false); code != exitInterrupted || errw.Len() == 0 {
+			t.Errorf("%v: exit %d, stderr %q", args[0], code, errw.String())
+		}
+	}
+}
+
+// TestExitCode classifies errors as the library and the commands return
+// them.
+func TestExitCode(t *testing.T) {
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	bg := context.Background()
+	pipe := outputErr(os.ErrClosed)
+	cases := []struct {
+		name string
+		ctx  context.Context
+		err  error
+		code int
+	}{
+		{"nil", bg, nil, exitOK},
+		{"usage", bg, usageErr("--x"), exitUsage},
+		{"cobra unknown command", bg, errors.New(`unknown command "x" for "mbtracectl"`), exitUsage},
+		{"export options", bg, fmt.Errorf("x: %w", mbcapexport.ErrOptions), exitUsage},
+		{"sub-trace selection", bg, subtrace.ErrTransactionSelection, exitUsage},
+		{"timeline format", bg, timeline.ErrUnknownFormat, exitUsage},
+		{"not a trace", bg, fmt.Errorf("trace: %w", trace.ErrFormat), exitInvalidInput},
+		{"damaged", bg, fmt.Errorf("trace: %w", trace.ErrCorrupt), exitInvalidInput},
+		{"second pass", bg, trace.ErrConsumed, exitInvalidInput},
+		{"no input", bg, trace.ErrNoInput, exitInvalidInput},
+		{"input marked", bg, inputErr(os.ErrNotExist), exitInvalidInput},
+		{"output", bg, pipe, exitInternal},
+		{"output through the library and inputErr", bg, inputErr(fmt.Errorf("timeline: %w", pipe)), exitInternal},
+		{"capture checker", bg, fmt.Errorf("x: %w", mbcapexport.ErrWriter), exitInternal},
+		{"unclassified", bg, errors.New("boom"), exitInternal},
+		{"cancelled", bg, inputErr(fmt.Errorf("trace: %w", context.Canceled)), exitInterrupted},
+		{"interrupted, any error", cancelled, pipe, exitInterrupted},
+	}
+	for _, tc := range cases {
+		if got := exitCode(tc.ctx, tc.err); got != tc.code {
+			t.Errorf("%s: %d, want %d", tc.name, got, tc.code)
+		}
 	}
 }

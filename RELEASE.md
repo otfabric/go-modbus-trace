@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.6.0
+
+**Date:** unreleased
+**Previous release:** v0.5.2
+
+### Breaking
+
+- `mbtracectl` exit codes follow the organisation table (otfabric engineering CLI-001). Old → new: a trace that cannot be opened, is not a trace or is damaged 1 → 3; an output that cannot be written 1 → 10; interrupted (Ctrl-C, now also SIGTERM) 1 → 130; an unknown command 1 → 2 (`mbtracectl export nope` 0 → 2); success 0 and usage 2 are unchanged. 1 is no longer used. Scripts that test for 1 should test for non-zero. Table: [cmd/mbtracectl/docs/exitcodes.md](cmd/mbtracectl/docs/exitcodes.md). Library code is unchanged.
+
+---
+
 ## v0.5.2
 
 **Date:** 2026-11-05

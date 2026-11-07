@@ -200,7 +200,7 @@ func (b *brokenPipe) Write(p []byte) (int, error) {
 func TestWriteErrors(t *testing.T) {
 	for _, args := range [][]string{{"summary", plant}, {"export", "mbcap", plant, "-o", filepath.Join(t.TempDir(), "x.mbcap")}} {
 		var errw bytes.Buffer
-		if code := run(context.Background(), args, bytes.NewReader(nil), &brokenPipe{n: 1}, &errw, false); code != exitError {
+		if code := run(context.Background(), args, bytes.NewReader(nil), &brokenPipe{n: 1}, &errw, false); code != exitInternal {
 			t.Errorf("%v: exit %d with a broken stdout", args[0], code)
 		}
 	}

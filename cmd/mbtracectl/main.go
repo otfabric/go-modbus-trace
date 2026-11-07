@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -27,11 +28,16 @@ var (
 	buildDate = "unknown"
 )
 
-// Exit codes (docs/exitcodes.md).
+// Exit codes (docs/exitcodes.md): the organisation table. No command
+// completes with a result that reports problems, so 1 (findings) is not
+// used; a damaged trace is invalid input even when what was read before the
+// damage is printed.
 const (
-	exitOK    = 0
-	exitError = 1
-	exitUsage = 2
+	exitOK           = 0
+	exitUsage        = 2
+	exitInvalidInput = 3
+	exitInternal     = 10 // output that cannot be written, or an internal error
+	exitInterrupted  = 130
 )
 
 // errUsage marks an error in the command line.
@@ -51,7 +57,7 @@ type env struct {
 }
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	os.Exit(run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr, isTerminal(os.Stderr)))
 }
@@ -62,24 +68,28 @@ func isTerminal(f *os.File) bool {
 }
 
 func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer, tty bool) int {
-	e := &env{stdin: stdin, stdout: stdout, stderr: stderr, progress: tty}
+	e := &env{stdin: stdin, stdout: outWriter{stdout}, stderr: stderr, progress: tty}
 	root := rootCommand(e)
 	root.SetArgs(args)
 	root.SetIn(stdin)
-	root.SetOut(stdout)
+	root.SetOut(e.stdout)
 	root.SetErr(stderr)
 	err := root.ExecuteContext(ctx)
-	switch {
-	case err == nil:
+	if err == nil {
 		return exitOK
-	case errors.Is(err, errUsage):
+	}
+	code := exitCode(ctx, err)
+	if code == exitUsage {
 		_, _ = fmt.Fprintf(stderr, "mbtracectl: %s\n", strings.TrimPrefix(err.Error(), errUsage.Error()+": "))
 		_, _ = fmt.Fprintln(stderr, "Run 'mbtracectl --help' for usage.")
-		return exitUsage
-	default:
-		_, _ = fmt.Fprintf(stderr, "mbtracectl: %v\n", err)
-		return exitError
+		return code
 	}
+	if code == exitInterrupted {
+		_, _ = fmt.Fprintln(stderr, "mbtracectl: interrupted")
+		return code
+	}
+	_, _ = fmt.Fprintf(stderr, "mbtracectl: %v\n", err)
+	return code
 }
 
 func rootCommand(e *env) *cobra.Command {

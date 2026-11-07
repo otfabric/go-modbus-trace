@@ -88,7 +88,8 @@ func open(e *env, arg string) (*trace.File, error) {
 	if arg == "-" {
 		return trace.OpenReader(e.stdin), nil
 	}
-	return trace.Open(arg)
+	f, err := trace.Open(arg)
+	return f, inputErr(err)
 }
 
 // scan runs a scan; a damaged file still returns what was read, with the
@@ -102,6 +103,7 @@ func scan(cmd *cobra.Command, e *env, args []string, o trace.ScanOptions) (*trac
 	if o.Progress != nil {
 		_, _ = fmt.Fprint(e.stderr, "\r\033[K")
 	}
+	err = inputErr(err)
 	if err != nil && sum == nil {
 		return nil, nil, err
 	}
