@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.7.3
+
+**Date:** 2026-11-08
+**Previous release:** v0.7.2
+
+### Changed
+
+- No changes. v0.7.3 was released by mistake from the same commit as v0.7.2, a few seconds later; the library and `mbtracectl` are identical to v0.7.2.
+
+---
+
 ## v0.7.2
 
 **Date:** 2026-11-08
