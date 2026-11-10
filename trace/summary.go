@@ -35,6 +35,11 @@ type FileSummary struct {
 	// TimeBackwards counts packets stamped earlier than the packet before
 	// them (merged captures, clock steps). The pipeline never sorts.
 	TimeBackwards uint64 `json:"time_backwards"`
+	// TSOSegments counts IPv4 packets whose total length was 0: captured
+	// on the sending host before TCP segmentation offload filled it in.
+	// They are used at their captured length, as Wireshark does; not an
+	// error.
+	TSOSegments uint64 `json:"tso_segments"`
 	// InternalErrors are recovered panics, the first 100 of
 	// InternalErrorCount; a non-zero count is a bug worth reporting.
 	InternalErrors     []InternalError `json:"internal_errors,omitempty"`

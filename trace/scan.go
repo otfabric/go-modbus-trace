@@ -228,6 +228,7 @@ func (sc *scanner) finish(dec *link.Decoder, tr *flow.Tracker) {
 			s.Unsupported[r.String()] = n
 		}
 	}
+	s.TSOSegments = dec.TSO
 	fr := dec.Defrag()
 	s.Fragments = Fragments{Reassembled: fr.Datagrams, Dropped: fr.Dropped, Incomplete: fr.Pending}
 	st := tr.Stats

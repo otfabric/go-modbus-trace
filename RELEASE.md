@@ -1,5 +1,28 @@
 # go-modbus-trace Releases
 
+## v0.8.0
+
+**Date:** 2026-11-10
+**Previous release:** v0.7.3
+
+### Fixed
+
+- **Captures taken on the sending host keep their segments.** With TCP segmentation offload, a capture on the host that sends (a SCADA or HMI client capturing its own traffic, typically on Windows) holds IPv4 packets whose total length is 0: the network card fills it in after the capture point. They were dropped as `bad_header`, so the Modbus/TCP payload they carried was lost and the trace showed gaps, unanswered requests or orphan responses that were not on the wire. Such a packet that is not a fragment is now taken at its captured length, as Wireshark does; a fragment with a total length of 0 is still refused. Found by go-mms-trace, which shares this link layer, comparing with Wireshark over public captures of ABB and Siemens IEDs.
+
+### Added
+
+- `FileSummary.TSOSegments` (`tso_segments`): the number of IPv4 packets taken at their captured length because their total length was 0. Not an error. Documented in docs/ARCHITECTURE.md; the JSON schemas, generated from the library that `mbtracectl` pins, gain it with the pin bump.
+
+### Tests
+
+- `TestTSOZeroLength` (`internal/link`) and `TestTSOSegments` (`trace`: a capture whose IPv4 packets all have a total length of 0 yields the same ADUs and counts them; it fails without the fix).
+
+### Known limitations
+
+- `mbtracectl` is a nested module pinned to the library v0.7.0: its binaries of this release still drop these packets. The next release bumps the pin.
+
+---
+
 ## v0.7.3
 
 **Date:** 2026-11-08
