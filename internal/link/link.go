@@ -112,6 +112,9 @@ type Decoder struct {
 	// set: the packet was an IP fragment (held, or completing it).
 	Frag     FragKey
 	Fragment bool
+	// TSO counts IPv4 packets whose total length was 0 (captured before
+	// segmentation offload filled it in), taken at their captured length.
+	TSO uint64
 }
 
 // NewDecoder returns a decoder whose fragment reassembly holds at most
@@ -212,6 +215,14 @@ func (d *Decoder) decode(linkType uint16, b []byte, s *Segment) Reason {
 		}
 		ihl := int(b[0]&0x0F) * 4
 		total := int(binary.BigEndian.Uint16(b[2:]))
+		if total == 0 && ihl >= 20 && binary.BigEndian.Uint16(b[6:])&0x3FFF == 0 {
+			// TCP segmentation offload: a capture on the sending host
+			// sees the segment before the NIC fills in the total length,
+			// so it is 0. The captured bytes are the datagram (as
+			// Wireshark presumes).
+			total = len(b)
+			d.TSO++
+		}
 		if ihl < 20 || total < ihl {
 			return BadHeader
 		}

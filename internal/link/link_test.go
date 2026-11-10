@@ -212,3 +212,20 @@ func TestDefragHostile(t *testing.T) {
 }
 
 const testFragBudget = 1 << 20
+
+// TestTSOZeroLength: an IPv4 packet with a total length of 0 (captured on
+// the sending host before segmentation offload filled it in) is taken at
+// its captured length and counted; a fragment with length 0 is not.
+func TestTSOZeroLength(t *testing.T) {
+	ip := ipv4(6, 0, tcp("hello"))
+	ip[2], ip[3] = 0, 0
+	d := NewDecoder(1 << 16)
+	var s Segment
+	if r := d.Decode(LinkEthernet, ether(0x0800, ip), &s); r != OK || string(s.Payload) != "hello" || d.TSO != 1 {
+		t.Errorf("TSO segment = %v %q, TSO %d", r, s.Payload, d.TSO)
+	}
+	ip[6] = 0x20 // more fragments
+	if r := d.Decode(LinkEthernet, ether(0x0800, ip), &s); r != BadHeader || d.TSO != 1 {
+		t.Errorf("zero-length fragment = %v, TSO %d", r, d.TSO)
+	}
+}
