@@ -222,6 +222,10 @@
           },
           "type": "object"
         },
+        "tso_segments": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "unsupported": {
           "anyOf": [
             {
@@ -253,6 +257,7 @@
         "sha256",
         "snaplen",
         "time_backwards",
+        "tso_segments",
         "unsupported"
       ],
       "type": "object"

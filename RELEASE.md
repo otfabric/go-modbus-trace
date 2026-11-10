@@ -1,5 +1,20 @@
 # go-modbus-trace Releases
 
+## v0.8.1
+
+**Date:** 2026-11-10
+**Previous release:** v0.8.0
+
+### Fixed
+
+- **`mbtracectl` is built on the library v0.8.0** (it was on v0.7.0): a capture taken on the sending host, whose IPv4 packets have a total length of 0 (TCP segmentation offload), keeps its Modbus/TCP payload instead of losing those packets as `bad_header`, and the summary reports them as `tso_segments`. It also brings the library changes of v0.7.1 to v0.7.3 to the command.
+
+### Changed
+
+- The JSON schemas `summary-1`, `file-summary-1` and `info-1` list `tso_segments` (generated from the library the command is built on); `docs/json-output.md` shows it.
+
+---
+
 ## v0.8.0
 
 **Date:** 2026-11-10
