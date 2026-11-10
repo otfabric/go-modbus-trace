@@ -26,7 +26,8 @@ output of every command against its schema.
       "quality": {"retransmitted": 575, "out_of_order": 192, "overlap_conflict": 192, "keepalives": 0, "syn_retransmits": 0,
                   "gaps": 192, "gap_bytes": 49728, "reassembly_overflow": 0, "reassembly_budget": 0, "resyncs": 192,
                   "resync_failed": 0, "junk_bytes": 0, "foreign_protocol": 0, "snaplen_truncated": 0},
-      "time_backwards": 0
+      "time_backwards": 0,
+      "tso_segments": 0
     },
     "flows": {"tcp": 64, "modbus_tcp": 64, "tls": 0}
   }]
