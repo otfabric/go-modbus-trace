@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.8.3
+
+**Date:** 2026-11-13
+**Previous release:** v0.8.2
+
+### Changed
+
+- `mbtracectl` is built on the library v0.8.2 (was v0.8.0): more than 65536 input files are refused instead of renumbered from 0. The golden output hashes of `testdata/plant.outputs.json` change because the mbcap export names the library version. Library code is the same as v0.8.2.
+
+---
+
 ## v0.8.2
 
 **Date:** 2026-11-13
