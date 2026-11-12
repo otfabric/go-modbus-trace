@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/netip"
 	"os"
 	"strings"
@@ -35,6 +36,10 @@ var (
 	// ErrNoInput is returned by OpenFiles without a path.
 	ErrNoInput = errors.New("trace: no input")
 )
+
+// maxParts is the number of files one trace can have: FrameRef.Part, the
+// index of a file, is a uint16.
+const maxParts = math.MaxUint16 + 1
 
 // File is an opened trace: one or more paths (any number of passes), or a
 // stream (one). Several paths are one continuous trace, read in the order
@@ -59,6 +64,9 @@ func Open(path string) (*File, error) { return OpenFiles(path) }
 func OpenFiles(paths ...string) (*File, error) {
 	if len(paths) == 0 {
 		return nil, ErrNoInput
+	}
+	if len(paths) > maxParts {
+		return nil, fmt.Errorf("trace: %d files, more than the %d a frame reference can name", len(paths), maxParts)
 	}
 	f := &File{}
 	for _, path := range paths {

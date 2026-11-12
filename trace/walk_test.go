@@ -265,3 +265,23 @@ func TestOpenErrors(t *testing.T) {
 		t.Errorf("foreign reference: %v", err)
 	}
 }
+
+// A trace of more files than FrameRef.Part can name is refused instead of
+// numbering later files from 0 again.
+func TestOpenFilesPartLimit(t *testing.T) {
+	pa, _ := twoFiles(t)
+	paths := make([]string, maxParts+1)
+	for i := range paths {
+		paths[i] = pa
+	}
+	if _, err := OpenFiles(paths...); err == nil {
+		t.Fatalf("%d files: no error", len(paths))
+	}
+	f, err := OpenFiles(paths[:maxParts]...)
+	if err != nil {
+		t.Fatalf("%d files: %v", maxParts, err)
+	}
+	if len(f.Names()) != maxParts {
+		t.Errorf("%d names", len(f.Names()))
+	}
+}
