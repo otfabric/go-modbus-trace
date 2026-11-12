@@ -1,5 +1,21 @@
 # go-modbus-trace Releases
 
+## v0.8.2
+
+**Date:** 2026-11-13
+**Previous release:** v0.8.1
+
+### Fixed
+
+- A packet limit (`trace.Limits.MaxPacket`) above the largest 32-bit length is treated as that length. Before, it was compared after a conversion that wrapped it, so a limit of 4 GiB refused every packet.
+- `trace.OpenFiles` refuses more than 65536 files, the number `FrameRef.Part` (a uint16) can name, instead of numbering later files from 0 again.
+
+### Changed
+
+- Tests use go-modbus v1.14.5 (the library does not import it outside tests). `mbtracectl` moves to this release in v0.8.3.
+
+---
+
 ## v0.8.1
 
 **Date:** 2026-11-10

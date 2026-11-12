@@ -10,9 +10,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -344,5 +346,44 @@ func TestTshark(t *testing.T) {
 	}
 	if theirs.String() != mine.String() {
 		t.Errorf("tshark:\n%s\nours:\n%s", out, mine.String())
+	}
+}
+
+// A limit above the largest 32-bit length must not wrap around to a small one
+// (1<<32 became 0 and refused every packet).
+func TestLimitAbove32Bits(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("int is 32 bits")
+	}
+	shift := 32
+	big := 1 << shift
+	for _, n := range []int{big, big + 10, math.MaxInt} {
+		if got := lengthLimit(n); got != math.MaxUint32 {
+			t.Errorf("lengthLimit(%d) = %d, want %d", n, got, uint32(math.MaxUint32))
+		}
+	}
+	if got := lengthLimit(100); got != 100 {
+		t.Errorf("lengthLimit(100) = %d", got)
+	}
+	var buf bytes.Buffer
+	w, err := NewPcapWriter(&buf, PcapOptions{LinkType: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WritePacket(t0, 0, bytes.Repeat([]byte{1}, 60)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	for _, data := range [][]byte{buf.Bytes(), ngFile(t, false)} {
+		rd, err := NewReader(bytes.NewReader(data), Options{MaxPacket: big, MaxBlock: big})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var p Packet
+		if err := rd.Next(&p); err != nil {
+			t.Fatalf("%v: first packet: %v", rd.Format(), err)
+		}
 	}
 }

@@ -1,6 +1,6 @@
 # Support and feature matrix
 
-What go-modbus-trace supports and how it is tested. Status: v0.2.0. Function by function: [COVERAGE.md](COVERAGE.md). Out of scope: [LIMITATIONS.md](../LIMITATIONS.md). Evidence: [TESTING.md](TESTING.md) and [INTEROPERABILITY.md](../INTEROPERABILITY.md).
+What go-modbus-trace supports and how it is tested. Status: v0.8.2. Function by function: [COVERAGE.md](COVERAGE.md). Out of scope: [LIMITATIONS.md](../LIMITATIONS.md). Evidence: [TESTING.md](TESTING.md) and [INTEROPERABILITY.md](../INTEROPERABILITY.md).
 
 None of this is a conformance claim: nothing is certified.
 
@@ -8,7 +8,7 @@ None of this is a conformance claim: nothing is certified.
 
 | go-modbus-trace | Go | go-modbus-capture | Supported |
 |---|---|---|---|
-| **v0.5.2** | 1.26 or later (CI: 1.26 and 1.27) | v0.1.0 | **yes** |
+| **v0.8.2** | 1.26 or later (CI: 1.26 and 1.27) | v0.1.0 | **yes** |
 
 ## 2. Platforms
 

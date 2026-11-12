@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"math"
 	"math/bits"
 )
 
@@ -139,6 +140,8 @@ type Reader struct {
 	sections []Section
 	c        Counters
 	opts     Options
+	maxPkt   uint32 // opts.MaxPacket as a capture length
+	maxBlk   uint32 // opts.MaxBlock as a block length
 	buf      []byte
 	hdr      [32]byte
 	done     bool
@@ -157,6 +160,23 @@ func (c *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
+// setLimits converts the limits of opts to the 32-bit lengths of a capture.
+// A limit above the largest 32-bit length limits nothing, so it becomes that
+// length instead of wrapping around.
+func (rd *Reader) setLimits() {
+	rd.maxPkt, rd.maxBlk = lengthLimit(rd.opts.MaxPacket), lengthLimit(rd.opts.MaxBlock)
+}
+
+func lengthLimit(n int) uint32 {
+	if n <= 0 {
+		return 0
+	}
+	if uint64(n) > math.MaxUint32 {
+		return math.MaxUint32
+	}
+	return uint32(n)
+}
+
 // NewReader detects the format from the first bytes, never from a name.
 func NewReader(r io.Reader, opts Options) (*Reader, error) {
 	if opts.MaxPacket <= 0 {
@@ -167,6 +187,7 @@ func NewReader(r io.Reader, opts Options) (*Reader, error) {
 	}
 	src := &countingReader{r: r, h: sha256.New()}
 	rd := &Reader{src: src, r: bufio.NewReaderSize(src, 256<<10), opts: opts, buf: make([]byte, 64<<10)}
+	rd.setLimits()
 	head, err := rd.r.Peek(4)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %d bytes", ErrFormat, len(head))
@@ -293,7 +314,7 @@ func (rd *Reader) Next(p *Packet) error {
 		return rd.eof(errors.Is(err, io.ErrUnexpectedEOF))
 	}
 	capLen, origLen := rd.bo.Uint32(h[8:]), rd.bo.Uint32(h[12:])
-	if capLen > uint32(rd.opts.MaxPacket) {
+	if capLen > rd.maxPkt {
 		rd.done = true
 		return fmt.Errorf("%w: record at offset %d has a captured length of %d bytes", ErrCorrupt, start, capLen)
 	}
@@ -348,7 +369,7 @@ func (rd *Reader) nextNG(p *Packet) error {
 			return fmt.Errorf("%w: no section header before offset %d", ErrFormat, start)
 		}
 		typ, n := rd.bo.Uint32(h[0:]), rd.bo.Uint32(h[4:])
-		if n < 12 || n%4 != 0 || n > uint32(rd.opts.MaxBlock) {
+		if n < 12 || n%4 != 0 || n > rd.maxBlk {
 			rd.done = true
 			return fmt.Errorf("%w: block at offset %d has a length of %d", ErrCorrupt, start, n)
 		}
@@ -400,7 +421,7 @@ func (rd *Reader) section(start int64, h []byte) error {
 		return fmt.Errorf("%w: section header at offset %d has no byte-order magic", ErrCorrupt, start)
 	}
 	n := bo.Uint32(h[4:])
-	if n < 28 || n%4 != 0 || n > uint32(rd.opts.MaxBlock) {
+	if n < 28 || n%4 != 0 || n > rd.maxBlk {
 		rd.done = true
 		return fmt.Errorf("%w: section header at offset %d has a length of %d", ErrCorrupt, start, n)
 	}
@@ -473,7 +494,7 @@ func (rd *Reader) epb(typ uint32, start int64, body []byte, p *Packet) bool {
 	}
 	capLen := rd.bo.Uint32(body[12:])
 	g := rd.secBase + int(id) // id < len: int(id) stays positive on 32-bit platforms
-	if id >= uint32(len(rd.ifaces)) || g >= len(rd.ifaces) || capLen > uint32(rd.opts.MaxPacket) || int(capLen) > len(body)-20 {
+	if id >= uint32(len(rd.ifaces)) || g >= len(rd.ifaces) || capLen > rd.maxPkt || int(capLen) > len(body)-20 {
 		rd.c.SkippedBlocks++
 		return false
 	}
@@ -498,7 +519,7 @@ func (rd *Reader) spb(start int64, body []byte, p *Packet) bool {
 	if f.SnapLen != 0 {
 		capLen = min(capLen, f.SnapLen)
 	}
-	if capLen > uint32(rd.opts.MaxPacket) {
+	if capLen > rd.maxPkt {
 		rd.c.SkippedBlocks++
 		return false
 	}
