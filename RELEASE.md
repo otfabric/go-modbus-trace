@@ -1,5 +1,16 @@
 # go-modbus-trace Releases
 
+## v0.8.4
+
+**Date:** 2026-11-13
+**Previous release:** v0.8.3
+
+### Changed
+
+- Tests use go-modbus v1.15.0 (was v1.14.5; the library does not import it outside tests). Library code and `mbtracectl` are unchanged.
+
+---
+
 ## v0.8.3
 
 **Date:** 2026-11-13
