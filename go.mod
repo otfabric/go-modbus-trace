@@ -3,7 +3,7 @@ module github.com/otfabric/go-modbus-trace
 go 1.26.0
 
 require (
-	github.com/otfabric/go-modbus v1.14.5
+	github.com/otfabric/go-modbus v1.15.0
 	github.com/otfabric/go-modbus-capture v0.1.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 )
