@@ -14,7 +14,8 @@ import (
 var ErrNotSeekable = errors.New("trace: random access needs an uncompressed trace file")
 
 // Index is what random access needs to re-read one record: the byte order
-// and interfaces of every section. Build it once per file.
+// and interfaces of every section. Build it once per file. It is not changed
+// after NewIndex, so ReadAt is safe for concurrent use.
 type Index struct {
 	format   Format
 	bo       binary.ByteOrder
@@ -30,9 +31,14 @@ type sectionAt struct {
 	base int // index of the section's first interface
 }
 
-// NewIndex reads the headers of a file: for pcapng it walks the block
-// headers and reads the interface descriptions, skipping the packets.
-func NewIndex(r io.ReaderAt, size int64) (*Index, error) {
+// NewIndex reads what random access needs from a file. For pcapng it is one
+// pass of the sequential reader itself over the file, bounded by opts, so
+// the index holds exactly the sections and interfaces a pass sees: a block
+// the reader skips (a damaged one, or one past a limit) is not in the index
+// either, and a packet read back by its offset has the interface, link type
+// and time the pass gave it. Where the reader stops (damage, a cut-short
+// tail), the index stops: it covers what came before.
+func NewIndex(r io.ReaderAt, size int64, opts Options) (*Index, error) {
 	var h [24]byte
 	if _, err := r.ReadAt(h[:4], 0); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrFormat, err)
@@ -58,49 +64,24 @@ func NewIndex(r io.ReaderAt, size int64) (*Index, error) {
 	default:
 		return nil, fmt.Errorf("%w: first bytes % x", ErrFormat, h[:4])
 	}
-	var bo binary.ByteOrder
-	for off := int64(0); off+12 <= size; {
-		var b [12]byte
-		if n, _ := r.ReadAt(b[:], off); n < len(b) {
-			break // a cut-short tail: index what came before
-		}
-		typ := binary.LittleEndian.Uint32(b[:])
-		if typ == blockSHB {
-			switch binary.LittleEndian.Uint32(b[8:]) {
-			case 0x1A2B3C4D:
-				bo = binary.LittleEndian
-			case 0x4D3C2B1A:
-				bo = binary.BigEndian
-			default:
-				return ix, nil // damaged: index what came before
+	rd, err := newReader(&countingReader{r: io.NewSectionReader(r, 0, size)}, opts)
+	if err != nil {
+		return nil, err
+	}
+	rd.ix = ix
+	var p Packet
+	for {
+		if err := rd.Next(&p); err != nil {
+			if errors.Is(err, ErrFormat) {
+				return nil, err // no section header at the start
 			}
-			ix.sections = append(ix.sections, sectionAt{off: off, bo: bo, base: len(ix.ifaces)})
-		} else if bo == nil {
-			return nil, fmt.Errorf("%w: no section header", ErrFormat)
+			break
 		}
-		n := int64(bo.Uint32(b[4:]))
-		if n < 12 || n%4 != 0 || n > DefaultMaxBlock {
-			return ix, nil
-		}
-		if bo.Uint32(b[:]) == blockIDB {
-			body := make([]byte, n-12)
-			if _, err := r.ReadAt(body, off+8); err == nil && len(body) >= 8 {
-				f := Interface{Section: len(ix.sections) - 1, LinkType: bo.Uint16(body), SnapLen: bo.Uint32(body[4:]), TSResol: 6}
-				rd := &Reader{bo: bo}
-				rd.options(body[8:], func(code uint16, v []byte) {
-					switch {
-					case code == 9 && len(v) >= 1:
-						if _, ok := unitsPerSecond(v[0]); ok {
-							f.TSResol = v[0]
-						}
-					case code == 14 && len(v) >= 8:
-						f.TSOffset = int64(bo.Uint64(v))
-					}
-				})
-				ix.ifaces = append(ix.ifaces, f)
-			}
-		}
-		off += n
+	}
+	// Only what ReadAt reads: the reader's table also counts packets.
+	ix.ifaces = make([]Interface, len(rd.ifaces))
+	for i, f := range rd.ifaces {
+		ix.ifaces[i] = Interface{Section: f.Section, LinkType: f.LinkType, SnapLen: f.SnapLen, TSResol: f.TSResol, TSOffset: f.TSOffset}
 	}
 	return ix, nil
 }
@@ -120,8 +101,10 @@ func (ix *Index) ReadAt(r io.ReaderAt, off int64) (Packet, error) {
 			return Packet{}, fmt.Errorf("%w: record at offset %d", ErrCorrupt, off)
 		}
 		data := make([]byte, capLen)
-		if _, err := r.ReadAt(data, off+16); err != nil {
-			return Packet{}, err
+		if capLen > 0 { // an empty record has nothing to read, also at the very end of the file
+			if _, err := r.ReadAt(data, off+16); err != nil {
+				return Packet{}, err
+			}
 		}
 		sub := int64(ix.bo.Uint32(h[4:]))
 		if (ix.nanos && sub >= 1e9) || (!ix.nanos && sub >= 1e6) {
@@ -143,24 +126,26 @@ func (ix *Index) ReadAt(r io.ReaderAt, off int64) (Packet, error) {
 		return Packet{}, err
 	}
 	typ, n := sec.bo.Uint32(h[:]), sec.bo.Uint32(h[4:])
-	if n < 12 || n > DefaultMaxBlock {
+	if n < 12 || n%4 != 0 || n > DefaultMaxBlock {
 		return Packet{}, fmt.Errorf("%w: block at offset %d", ErrCorrupt, off)
 	}
-	body := make([]byte, n-12)
-	if _, err := r.ReadAt(body, off+8); err != nil {
+	block := make([]byte, n-8)
+	if _, err := r.ReadAt(block, off+8); err != nil {
 		return Packet{}, err
 	}
-	// A copy of the interfaces: the reader counts packets in them, and
-	// ReadAt must be safe for concurrent use.
-	rd := &Reader{bo: sec.bo, ifaces: append([]Interface(nil), ix.ifaces...), secBase: sec.base, opts: Options{MaxPacket: DefaultMaxBlock}}
-	rd.setLimits()
+	// The same decoders as the sequential reader, on the same table: the
+	// table is only read, so calls do not disturb each other.
 	var p Packet
-	ok := false
-	switch typ {
-	case blockEPB, blockPB:
-		ok = rd.epb(typ, off, body, &p)
-	case blockSPB:
-		ok = rd.spb(off, body, &p)
+	ok := sec.bo.Uint32(block[len(block)-4:]) == n // as the reader: the trailing length agrees
+	body := block[:len(block)-4]
+	switch {
+	case !ok:
+	case typ == blockEPB || typ == blockPB:
+		ok = epbAt(sec.bo, ix.ifaces, sec.base, DefaultMaxBlock, typ, off, body, &p)
+	case typ == blockSPB:
+		ok = spbAt(sec.bo, ix.ifaces, sec.base, DefaultMaxBlock, off, body, &p)
+	default:
+		ok = false
 	}
 	if !ok {
 		return Packet{}, fmt.Errorf("%w: no packet at offset %d", ErrCorrupt, off)

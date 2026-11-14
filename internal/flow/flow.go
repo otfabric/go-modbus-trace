@@ -154,7 +154,24 @@ type Conn struct {
 
 	key        key
 	dirs       [2]half
-	prev, next *Conn // LRU list
+	prev, next *Conn  // LRU list
+	stamp      uint64 // order of the last touch: greater is more recent
+	holder     int    // 1 + index in the tracker's heap of connections with held bytes; 0: not in it
+}
+
+// AckedAhead reports whether the peer has acknowledged bytes of direction d
+// that the capture has not delivered (or skipped as a gap) yet: bytes that
+// reached the peer but not the capture, or not yet.
+func (c *Conn) AckedAhead(d int) bool {
+	h := &c.dirs[d]
+	if !h.started || !h.hasPeer {
+		return false
+	}
+	next := h.next
+	if h.fin {
+		next++ // the FIN takes a sequence number
+	}
+	return seqLT(next, h.peerAck)
 }
 
 type key struct{ a, b netip.AddrPort }
@@ -171,7 +188,18 @@ type pending struct {
 	data    []byte
 	missing uint32
 	ch      Chunk
-	cost    int // len(data) + heldOverhead, charged against the limits
+	cost    int    // len(data) + heldOverhead, charged against the limits
+	ord     uint64 // order of capture among the held segments
+}
+
+// before reports whether p is delivered before q: in sequence order, and of
+// two segments with the same start the one captured first (the first data
+// wins).
+func (p *pending) before(q *pending) bool {
+	if p.seq != q.seq {
+		return seqLT(p.seq, q.seq)
+	}
+	return p.ord < q.ord
 }
 
 // heldOverhead is charged per held segment besides its bytes, so empty or
@@ -189,7 +217,7 @@ type half struct {
 	hasPeer  bool
 	firstAck uint32 // the first ACK the peer sent: where the capture of this direction could start
 	fin      bool
-	pend     []pending
+	pend     []pending // held segments: a heap, pend[0] is delivered first (before)
 	pendLen  int
 	tail     []byte
 	gapEnd   uint64 // stream position where the last gap ended
@@ -219,6 +247,12 @@ type Tracker struct {
 	pendAll int
 	ids     uint32
 	gapping int // > 0 while gapTo drains: held data follows a skipped hole
+	// holders are the connections with held bytes: a heap whose first is
+	// the one the total budget takes from (largest).
+	holders []*Conn
+	clock   uint64 // touches so far
+	held    uint64 // segments held so far
+	work    uint64 // heap comparisons so far: the work of holding, for the budget tests
 }
 
 // NewTracker returns a tracker. Zero limits take the defaults.
@@ -253,6 +287,11 @@ func (t *Tracker) touch(c *Conn) {
 	c.prev, c.next = &t.lru, t.lru.next
 	t.lru.next.prev = c
 	t.lru.next = c
+	t.clock++
+	c.stamp = t.clock
+	if c.holder != 0 {
+		t.rank(c) // of two connections that hold the same, the more recent comes first
+	}
 }
 
 func (t *Tracker) unlink(c *Conn) {
@@ -316,12 +355,7 @@ func (t *Tracker) dir(c *Conn, src netip.AddrPort) int {
 
 func (t *Tracker) newConn(k key, p *pcapio.Packet, s *link.Segment) *Conn {
 	for len(t.conns) >= t.L.MaxConns {
-		old := t.lru.prev
-		if old.Close == Live {
-			t.end(old, CloseEvict)
-			t.Stats.Evicted++
-		}
-		t.unlink(old)
+		t.Evict(t.lru.prev)
 	}
 	t.ids++
 	t.Stats.Conns++
@@ -330,6 +364,18 @@ func (t *Tracker) newConn(k key, p *pcapio.Packet, s *link.Segment) *Conn {
 	t.conns[k] = c
 	t.Stats.MaxTracked = max(t.Stats.MaxTracked, len(t.conns))
 	return c
+}
+
+// Evict forgets a tracked connection to make room: a live one is closed
+// first (CloseEvict) and counted. The connection limit evicts the least
+// recently seen connection this way; a consumer whose own limit is reached
+// may evict another, between two packets.
+func (t *Tracker) Evict(c *Conn) {
+	if c.Close == Live {
+		t.end(c, CloseEvict)
+		t.Stats.Evicted++
+	}
+	t.unlink(c)
 }
 
 // seen updates the connection's packet facts.
@@ -521,38 +567,154 @@ func (t *Tracker) hold(c *Conn, d int, seq uint32, b []byte, missing uint32, ch 
 		}
 	}
 	// After any held segment with the same start: the first data wins.
-	i := sort.Search(len(h.pend), func(i int) bool { return seqLT(seq, h.pend[i].seq) })
-	h.pend = append(h.pend, pending{})
-	copy(h.pend[i+1:], h.pend[i:])
-	h.pend[i] = pending{seq: seq, data: append([]byte(nil), b...), missing: missing, ch: ch, cost: cost}
+	t.held++
+	t.push(h, pending{seq: seq, data: append([]byte(nil), b...), missing: missing, ch: ch, cost: cost, ord: t.held})
 	h.pendLen += cost
 	t.pendAll += cost
+	t.rank(c)
+}
+
+// push adds a held segment to the direction's heap. Holding a segment costs
+// a number of comparisons that grows with the logarithm of the segments
+// held, in whatever order they arrive.
+func (t *Tracker) push(h *half, p pending) {
+	h.pend = append(h.pend, p)
+	for i := len(h.pend) - 1; i > 0; {
+		up := (i - 1) / 2
+		t.work++
+		if !h.pend[i].before(&h.pend[up]) {
+			break
+		}
+		h.pend[i], h.pend[up] = h.pend[up], h.pend[i]
+		i = up
+	}
+}
+
+// pop removes and returns the held segment that is delivered first.
+func (t *Tracker) pop(h *half) pending {
+	top := h.pend[0]
+	n := len(h.pend) - 1
+	h.pend[0] = h.pend[n]
+	h.pend[n] = pending{}
+	h.pend = h.pend[:n]
+	for i := 0; ; {
+		least := i
+		for _, k := range [2]int{2*i + 1, 2*i + 2} {
+			if k < n {
+				t.work++
+				if h.pend[k].before(&h.pend[least]) {
+					least = k
+				}
+			}
+		}
+		if least == i {
+			return top
+		}
+		h.pend[i], h.pend[least] = h.pend[least], h.pend[i]
+		i = least
+	}
+}
+
+// last returns the held segment that is delivered last.
+func (h *half) last() *pending {
+	last := &h.pend[0]
+	for i := 1; i < len(h.pend); i++ {
+		if last.before(&h.pend[i]) {
+			last = &h.pend[i]
+		}
+	}
+	return last
+}
+
+// held returns the most bytes the connection holds in one direction.
+func (c *Conn) held() int { return max(c.dirs[0].pendLen, c.dirs[1].pendLen) }
+
+// outranks reports whether c gives up held bytes before x when the total
+// budget is reached: the connection that holds more in one direction, and of
+// two that hold the same the one seen more recently.
+func (c *Conn) outranks(x *Conn) bool {
+	if a, b := c.held(), x.held(); a != b {
+		return a > b
+	}
+	return c.stamp > x.stamp
+}
+
+// rank puts the connection where it belongs among the holders after its
+// held bytes or its last touch changed; a connection that holds nothing
+// leaves them.
+func (t *Tracker) rank(c *Conn) {
+	hs := t.holders
+	i := c.holder - 1
+	switch {
+	case c.held() == 0 && i < 0:
+		return
+	case c.held() == 0: // leaves: the last one takes its place and is ranked from there
+		n := len(hs) - 1
+		last := hs[n]
+		hs[n] = nil
+		t.holders = hs[:n]
+		c.holder = 0
+		if c == last {
+			return
+		}
+		hs[i] = last
+		last.holder = i + 1
+	case i < 0:
+		t.holders = append(hs, c)
+		i = len(hs)
+		c.holder = i + 1
+	}
+	hs = t.holders
+	for i > 0 { // up
+		up := (i - 1) / 2
+		t.work++
+		if !hs[i].outranks(hs[up]) {
+			break
+		}
+		hs[i], hs[up] = hs[up], hs[i]
+		hs[i].holder, hs[up].holder = i+1, up+1
+		i = up
+	}
+	for { // down
+		first := i
+		for _, k := range [2]int{2*i + 1, 2*i + 2} {
+			if k < len(hs) {
+				t.work++
+				if hs[k].outranks(hs[first]) {
+					first = k
+				}
+			}
+		}
+		if first == i {
+			return
+		}
+		hs[i], hs[first] = hs[first], hs[i]
+		hs[i].holder, hs[first].holder = i+1, first+1
+		i = first
+	}
 }
 
 // largest returns the connection holding the most buffered bytes in one
-// direction (a scan: the budget bites rarely).
+// direction; of several that hold the same, the one seen most recently.
 func (t *Tracker) largest() *Conn {
-	var best *Conn
-	n := 0
-	for c := t.lru.next; c != &t.lru; c = c.next {
-		for d := range c.dirs {
-			if c.dirs[d].pendLen > n {
-				best, n = c, c.dirs[d].pendLen
-			}
-		}
+	if len(t.holders) == 0 {
+		return nil
 	}
-	return best
+	return t.holders[0]
 }
 
 // compare checks bytes at seq, all before next, against the delivered tail.
+// The distance back from next is a 32-bit sequence difference: it is compared
+// as such, and becomes an int only once it is known to lie within the tail
+// and the segment.
 func (t *Tracker) compare(c *Conn, h *half, seq uint32, b []byte) {
-	back := int(h.next - seq)
+	dist := h.next - seq
+	if uint64(dist) >= uint64(len(h.tail))+uint64(len(b)) {
+		return // the segment ends at or before the start of the tail
+	}
+	back := int(dist)
 	if back > len(h.tail) {
-		skip := back - len(h.tail)
-		if skip >= len(b) {
-			return
-		}
-		b, back = b[skip:], len(h.tail)
+		b, back = b[back-len(h.tail):], len(h.tail)
 	}
 	old := h.tail[len(h.tail)-back:]
 	n := min(len(old), len(b))
@@ -566,10 +728,10 @@ func (t *Tracker) compare(c *Conn, h *half, seq uint32, b []byte) {
 func (t *Tracker) drain(c *Conn, d int, filled bool) {
 	h := &c.dirs[d]
 	for len(h.pend) > 0 && !seqLT(h.next, h.pend[0].seq) {
-		q := h.pend[0]
-		h.pend = h.pend[1:]
+		q := t.pop(h)
 		h.pendLen -= q.cost
 		t.pendAll -= q.cost
+		t.rank(c)
 		if filled && t.gapping == 0 {
 			c.Stats.OutOfOrder++
 			q.ch.OutOfOrder = true
@@ -643,8 +805,8 @@ func (t *Tracker) gapTo(c *Conn, d int, seq uint32, kind GapKind) {
 func (t *Tracker) end(c *Conn, why Close) {
 	for d := range c.dirs {
 		h := &c.dirs[d]
-		if n := len(h.pend); n > 0 {
-			last := h.pend[n-1]
+		if len(h.pend) > 0 {
+			last := h.last()
 			t.gapTo(c, d, last.seq+uint32(len(last.data))+last.missing, GapLoss)
 		}
 	}

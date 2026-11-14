@@ -7,6 +7,9 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"io"
+	"net/netip"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -180,4 +183,94 @@ func TestCSVRows(t *testing.T) {
 	if _, err := newWriter(&bytes.Buffer{}, 9); err == nil {
 		t.Error("an unknown format")
 	}
+}
+
+// TestConnectionsAreForgotten: the export remembers a connection (whether
+// its events are selected) from its conn.open to its conn.close, its last
+// event, and not after: what it holds does not grow with the number of
+// connections in the trace. A gap of an open connection follows the
+// connection's selection.
+func TestConnectionsAreForgotten(t *testing.T) {
+	w, err := newWriter(io.Discard, JSONL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	only := tracetest.MustEndpoint("10.0.0.9:502")
+	s := &sink{to: Options{Format: JSONL, Order: ByFile, Selection: selection.Selection{Servers: []netip.AddrPort{only}}}, w: w}
+	const conns = 40_000
+	before := liveHeap()
+	for i := 1; i <= conns; i++ {
+		c := &model.Connection{ID: uint32(i), Client: tracetest.MustEndpoint("10.0.0.1:40000"), Server: only}
+		if i%2 == 0 {
+			c.Server = tracetest.MustEndpoint("10.0.0.8:502") // not selected
+		}
+		for _, e := range []*model.Event{
+			{Kind: model.KindConnOpen, Conn: c},
+			{Kind: model.KindGap, Gap: &model.Gap{Conn: c.ID, Dir: "c2s", Reason: "loss"}},
+			{Kind: model.KindResync, Resync: &model.Resync{Conn: c.ID, Dir: "c2s", Confidence: "run_end"}},
+			{Kind: model.KindConnClose, Conn: c},
+		} {
+			if err := s.Event(e); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if len(s.conns) != 0 {
+			t.Fatalf("after connection %d closed, %d connections are remembered", i, len(s.conns))
+		}
+	}
+	after := liveHeap()
+	if s.st.Rows != 4*conns/2 {
+		t.Errorf("%d rows, want the 4 events of every selected connection: %d", s.st.Rows, 4*conns/2)
+	}
+	// A map entry of every connection would be a megabyte.
+	if held := after - min(after, before); held > 128<<10 {
+		t.Errorf("%d bytes live after %d connections", held, conns)
+	}
+	runtime.KeepAlive(s)
+}
+
+// liveHeap returns the bytes of live heap objects after a collection.
+func liveHeap() uint64 {
+	runtime.GC()
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return m.HeapAlloc
+}
+
+// TestReorderBufferHeap: the rows held for ordering by time are bounded by
+// Options.Buffer in heap bytes: a trace whose rows all fall inside the
+// window leaves the buffer's worth of rows live, not the trace's.
+func TestReorderBufferHeap(t *testing.T) {
+	w, err := newWriter(io.Discard, JSONL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const buffer = 1 << 20
+	s := &sink{to: Options{Format: JSONL, Order: ByTime, Window: 24 * time.Hour, Buffer: buffer}, w: w}
+	at := time.Date(2026, 10, 15, 8, 0, 0, 0, time.UTC)
+	before := liveHeap()
+	const events = 60_000 // about 9 MiB of rows
+	for i := range events {
+		ts := at.Add(time.Duration(i) * time.Millisecond)
+		e := &model.Event{Kind: model.KindGap, Seq: uint64(i + 1), Time: &ts, Gap: &model.Gap{Conn: 1, Dir: "c2s", Reason: "loss", Pos: uint64(i), Bytes: 12}}
+		if i == 0 {
+			e = &model.Event{Kind: model.KindConnOpen, Seq: 1, Time: &ts, Conn: &model.Connection{ID: 1}}
+		}
+		if err := s.Event(e); err != nil {
+			t.Fatal(err)
+		}
+		if s.held > buffer {
+			t.Fatalf("%d bytes of rows held, buffer %d", s.held, buffer)
+		}
+	}
+	after := liveHeap()
+	held := after - min(after, before)
+	t.Logf("%d events, %d rows held of %d bytes: %d KiB live (buffer %d KiB)", events, s.q.Len(), s.held, held>>10, buffer>>10)
+	// A held row is its bytes and its place in the queue: under three times
+	// the buffer for rows of this size.
+	if s.st.Rows == 0 || s.held < buffer/2 || held > 3*buffer {
+		t.Errorf("%d rows written, %d bytes held, %d bytes live", s.st.Rows, s.held, held)
+	}
+	runtime.KeepAlive(s)
 }

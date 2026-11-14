@@ -43,7 +43,7 @@ The exporter classifies every transaction. Only a row marked **yes** is written;
 | FC23 (Read/Write Multiple Registers) | no; its read part is **not** turned into an FC03 sample and no write echo becomes a read sample | `fc23` |
 | Unknown, vendor or user-defined function code | no | `unsupported_function` |
 | Status `unanswered`, `orphan_response`, `ambiguous`, `malformed`, `uncertain` | no | `unanswered`, `orphan_response`, `ambiguous_pair`, `malformed`, `uncertain` |
-| Flag `invalid_pdu` (a validation rule failed), or FC01-04 whose response size does not match the request (`capture.SplitAddresses` returns false) | no | `invalid_pdu`, `response_mismatch` |
+| Flag `invalid_pdu` (a validation rule failed: also a read whose range ends beyond address 65535, `address_out_of_range`, whatever the device answered), or FC01-04 whose response size does not match the request (`capture.SplitAddresses` returns false) | no | `invalid_pdu`, `response_mismatch` |
 | Flag `snaplen_truncated`, `resynced` on either ADU | no | `snaplen_truncated`, `resynced` |
 | Flag `clock_order` (response stamped before its request) | no | `clock_order` |
 | Connection role `unknown` | no | `role_unknown` |
@@ -64,7 +64,7 @@ Written next to the capture on request (`--report report.json`) and returned by 
 {
   "schema_version": 1,
   "library": "go-modbus-trace v0.5.1",
-  "capture_library": "go-modbus-capture v0.2.1",
+  "capture_library": "go-modbus-capture v0.2.2",
   "format": "MBCAP draft 0.1",
   "inputs": [{"file": "site.pcapng", "sha256": "...", "packets": 1830211, "first": "...", "last": "..."}],
   "selection": "unit=1,2; from=0s",

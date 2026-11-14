@@ -18,6 +18,7 @@ const (
 	WarnTruncated      = "truncated"       // shorter than the function's fixed part
 	WarnLength         = "length_mismatch" // longer or shorter than its fields say
 	WarnQuantity       = "quantity_out_of_range"
+	WarnAddress        = "address_out_of_range" // the range starts in the 16-bit address space and ends beyond it
 	WarnByteCount      = "byte_count_mismatch"
 	WarnCoilValue      = "coil_value" // FC05 value not 0xFF00 or 0x0000
 	WarnExceptionCode  = "unknown_exception_code"

@@ -20,14 +20,16 @@ var ErrNotSeekable = pcapio.ErrNotSeekable
 // input file this File does not have (a reference from another trace).
 var ErrFrameRef = errors.New("trace: frame reference to a file not in this trace")
 
-// Frame is one packet read back by reference.
+// Frame is one packet read back by reference. It belongs to the caller:
+// Data is newly read for every Frames call, and Payload is the part of Data
+// that the reference names (the same bytes, not a copy).
 type Frame struct {
 	Ref      model.FrameRef // the reference it was read by
 	LinkType uint16         // LINKTYPE_ value of its interface
 	TimeNS   int64          // packet time, nanoseconds since 1970
 	OrigLen  uint32         // length on the wire; more than len(Data) when the snap length cut it
 	Data     []byte         // the captured packet
-	Payload  []byte         // the ADU bytes this packet carried; nil after IP reassembly
+	Payload  []byte         // the ADU bytes this packet carried; nil after IP reassembly, or when the reference's payload range is not inside the packet
 }
 
 type frameIndex struct {
@@ -39,6 +41,14 @@ type frameIndex struct {
 // Frames re-reads the referenced packets of uncompressed trace files by
 // their offsets, so an application can show raw bytes without keeping
 // them. It is safe for concurrent use.
+//
+// A packet read back has the link type and time the pass that reported it
+// gave it. For a pcapng file the first call reads the file once, with the
+// default Limits.MaxInterfaces and Limits.MaxSections, to learn its sections
+// and interfaces as a pass does; later calls read only the packets. A
+// reference is the caller's: one whose offset is not the start of a packet
+// gives an error wrapping ErrCorrupt, and one whose payload range is not
+// inside its packet gives the Frame without Payload.
 func (f *File) Frames(refs []model.FrameRef) ([]Frame, error) {
 	for _, p := range f.parts {
 		if p.stream != nil {
@@ -74,7 +84,7 @@ func (p *part) frame(r model.FrameRef) (Frame, error) {
 			p.index.err = err
 			return
 		}
-		p.index.ix, p.index.err = pcapio.NewIndex(fh, fi.Size())
+		p.index.ix, p.index.err = pcapio.NewIndex(fh, fi.Size(), pcapio.Options{})
 	})
 	if errors.Is(p.index.err, pcapio.ErrNotSeekable) {
 		return Frame{}, ErrNotSeekable
@@ -87,7 +97,9 @@ func (p *part) frame(r model.FrameRef) (Frame, error) {
 		return Frame{}, fmt.Errorf("frame %d: %w", r.Frame, err)
 	}
 	fr := Frame{Ref: r, LinkType: pk.LinkType, TimeNS: pk.TimeNS, OrigLen: pk.OrigLen, Data: pk.Data}
-	if r.PayOff >= 0 && int(r.PayOff)+int(r.PayLen) <= len(pk.Data) {
+	// A reference is the caller's: its payload range is used only when it
+	// lies inside the packet (compared in 64 bits: an int may have 32).
+	if r.PayOff >= 0 && r.PayLen >= 0 && int64(r.PayLen) <= int64(len(pk.Data))-int64(r.PayOff) {
 		fr.Payload = pk.Data[r.PayOff : r.PayOff+r.PayLen]
 	}
 	return fr, nil

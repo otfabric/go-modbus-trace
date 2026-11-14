@@ -125,7 +125,7 @@ func TestDefrag(t *testing.T) {
 		}
 	})
 	t.Run("budget", func(t *testing.T) {
-		f := NewDefrag(300) // one datagram of 32 bytes costs 32+fragOverhead+datagramOverhead
+		f := NewDefrag(datagramOverhead + 100) // one datagram of 32 bytes costs its 32 bytes, 8 for its 4 blocks, and datagramOverhead
 		f.Add(k, 0, true, data[:32])
 		k2 := k
 		k2.ID = 2
@@ -169,7 +169,7 @@ func TestDefragHostile(t *testing.T) {
 			t.Fatalf("%d bytes held over a budget of %d", f.used, testFragBudget)
 		}
 	}
-	if f.Pending > testFragBudget/(8+fragOverhead+datagramOverhead) {
+	if f.Pending > testFragBudget/(8+2+datagramOverhead) { // 8 bytes, one block
 		t.Errorf("%d datagrams pending", f.Pending)
 	}
 	for i := range 100_000 { // complete ones: the order list stays short

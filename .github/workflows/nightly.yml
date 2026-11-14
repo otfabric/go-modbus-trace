@@ -1,7 +1,8 @@
 # Extended tier (otfabric/engineering standards/testing.md#ci-tiers): long
-# fuzzing, many chaos seeds and the full soak. A chaos failure logs its seed:
-# MBTRACE_CHAOS_SEED=<seed> replays it. A fuzz failure leaves its input in the
-# artifact: commit it with the fix.
+# fuzzing, many chaos seeds, the full soak and the tests on a 32-bit
+# architecture. A chaos failure logs its seed: MBTRACE_CHAOS_SEED=<seed>
+# replays it. A fuzz failure leaves its input in the artifact: commit it with
+# the fix.
 name: Nightly
 run-name: "Nightly on ${{ github.ref_name }}"
 
@@ -69,3 +70,19 @@ jobs:
           go-version-file: go.mod
           check-latest: true
       - run: make soak SOAK_GIB=${{ inputs.soak-gib || '5' }}
+
+  # Platform width (otfabric/engineering standards/testing.md#platform-width):
+  # the readers, the link parser and the reassembly convert file and wire
+  # integers to int, so the tests also run where int has 32 bits. ubuntu
+  # runners execute 386 binaries; the race detector does not exist for 386.
+  test-386:
+    name: Tests on a 32-bit architecture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+      - run: GOARCH=386 go test -count=1 ./...

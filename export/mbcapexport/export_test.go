@@ -583,3 +583,65 @@ func TestQualityCounts(t *testing.T) {
 	}
 	identity(t, rep)
 }
+
+// TestResponseAfterRequestGap: a response that follows a hole in the request
+// direction and pairs with a request from before the hole is uncertain, so
+// its values are not written under that request's addresses.
+func TestResponseAfterRequestGap(t *testing.T) {
+	data := build(t, func(b *tracetest.Builder) {
+		c := b.Conn(tracetest.ConnOptions{})
+		c.Request(4, 1, tracetest.ReadRequest(3, 10, 2))
+		c.Response(4, 1, tracetest.RegistersResponse(3, 1, 2)) // a certain pair
+		c.Request(4, 1, tracetest.ReadRequest(3, 10, 2))       // not answered
+		c.Write(tracetest.ToServer, tracetest.WriteOpts{Lose: []int{0}},
+			tracetest.Frame{TID: 4, Unit: 1, PDU: tracetest.ReadRequest(3, 60, 2)}) // sent, not captured
+		c.Response(4, 1, tracetest.RegistersResponse(3, 0x0A0B, 0x0C0D)) // the answer to it
+		c.Close()
+	})
+	out, rep := export(t, data, Options{}, "jsonl")
+	if rep.SamplesWritten != 1 || rep.Excluded[string(Uncertain)] != 1 || rep.TransactionsSeen != 2 {
+		t.Errorf("written %d, excluded %v, seen %d", rep.SamplesWritten, rep.Excluded, rep.TransactionsSeen)
+	}
+	if bytes.Contains(out, []byte("0a0b0c0d")) {
+		t.Errorf("the values read at another address were written:\n%s", out)
+	}
+	identity(t, rep)
+}
+
+// TestAddressRangeNotExported: a read whose range ends beyond address 65535
+// is not written, whatever the device answered: the request is invalid
+// (address_out_of_range). A read of the last addresses is written.
+func TestAddressRangeNotExported(t *testing.T) {
+	regs := tracetest.RegistersResponse
+	data := build(t, func(b *tracetest.Builder) {
+		c := b.Conn(tracetest.ConnOptions{})
+		c.Request(1, 1, tracetest.ReadRequest(3, 65534, 2))
+		c.Response(1, 1, regs(3, 1, 2))
+		c.Request(2, 1, tracetest.ReadRequest(3, 65535, 2))
+		c.Response(2, 1, regs(3, 3, 4))
+		c.Request(3, 1, tracetest.ReadRequest(3, 65535, 2))
+		c.Response(3, 1, tracetest.Exception(3, 2))
+		c.Close()
+	})
+	var got []Reason
+	var warns [][]string
+	if _, err := trace.Analyze(context.Background(), trace.OpenReader(bytes.NewReader(data)), trace.Options{},
+		trace.SinkFunc(func(e *model.Event) error {
+			if e.Txn != nil {
+				got = append(got, Classify(e.Txn))
+				warns = append(warns, e.Txn.Warnings)
+			}
+			return nil
+		})); err != nil {
+		t.Fatal(err)
+	}
+	if fmt.Sprint(got) != fmt.Sprint([]Reason{Admit, InvalidPDU, InvalidPDU}) ||
+		fmt.Sprint(warns) != fmt.Sprint([][]string{nil, {mbtcp.WarnAddress}, {mbtcp.WarnAddress}}) {
+		t.Errorf("reasons %q, warnings %v", got, warns)
+	}
+	_, rep := export(t, data, Options{}, "jsonl")
+	if rep.SamplesWritten != 1 || rep.Excluded[string(InvalidPDU)] != 2 {
+		t.Errorf("written %d, excluded %v", rep.SamplesWritten, rep.Excluded)
+	}
+	identity(t, rep)
+}

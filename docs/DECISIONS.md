@@ -226,6 +226,20 @@ A requirements audit and a code-quality audit of the L0–L4 code, and new chaos
 - **Not built, by decision:** the resync rule (b) of ARCHITECTURE section 7 (match an outstanding request); the structural rules resynchronised every scenario, random script, chaos seed and fuzz input. A per-flow role override (L6): endpoint overrides cover it. The text timeline ignores `--order` (it prints in determination order).
 - **L3 versus LA3:** L3 says the same 4-tuple on two interfaces is "reported, not merged"; LA3 says duplicates must not duplicate transactions. Merging with `multiple_interfaces` set satisfies both readings that matter: the interfaces stay in the provenance and nothing is counted twice.
 
+## D14. v0.9.0: limits hold memory and work, a pair needs every request, one reader (2026-11-14)
+
+A review against otfabric/engineering policy 1.6 led to these decisions (RELEASE.md v0.9.0 lists what changes for a caller):
+
+- **A limit bounds the heap and the work behind it, and a test measures that.** Each limit of ARCHITECTURE section 2 has a test that feeds input made to grow its state without end and compares the live heap, or the steps taken, with a budget derived from the limit (TESTING section 3a). Where a limit counted less than the heap behind an item, the count was raised to what was measured (448 per datagram being reassembled).
+- **No product of two limits is left as the bound.** What the analysis holds per connection (requests waiting, ADUs held while roles are undecided, provenance of bytes being framed) is limited per connection, and the connections are limited too, but the product is not a useful bound. `Limits.AnalysisBudget` (64 MiB) bounds the sum, as `BufferTotal` does for reassembly (Q4). The connection whose state was added to least recently gives up first: stale state goes before live state, and finding it costs nothing per packet (a list in order of the last charge, where a heap by size would cost a number of steps on every ADU and every segment).
+- **Structures that grow with input cost logarithmic or proportional work.** Held segments and the connections that hold them are heaps; fragment reassembly keeps one buffer per datagram and, per 8-byte block, which fragment gave it. Neither needs a limit on the number of segments or fragments, so no new input is refused for the sake of the work.
+- **The flow list is a result, so it has its own limit.** `Scan` returns it; `Analyze` does not build it. `Limits.MaxFlows` (1,000,000) bounds it and `connections.flows_dropped` counts the rest.
+- **Interfaces and sections are limited per file by count, their option text by bytes.** A count alone would leave up to 64 KiB of text per block.
+- **A response is certain only when every request before it was captured.** A hole in the request direction makes a later response uncertain for the requests that waited across it (ARCHITECTURE section 9). The response's own acknowledgement number shows the hole before a gap can be declared, so the rule does not depend on when the gap is declared. It reuses the flag `gap_adjacent`; a new flag would have changed the event schema. This is independent of Q9.
+- **Random access uses the sequential reader.** The index of a pcapng file is built by the reader itself, so the two cannot see different interfaces; the cost is one sequential read of the file on the first `Frames` call instead of one small read per block.
+- **A sink that does not return normally stays contained and counted** as an internal error, and the pass goes on (now documented on `trace.Sink`). Returning it as an error of the pass instead was considered and left for a release that may change what `Analyze` returns.
+- **`EventSemanticsVersion` stays 1 in this release.** The statuses of some transactions change (the pairing rule, the address warning), which is what the constant is there to announce; the release's API gate reads a changed constant as an incompatible change, so the bump is left to the maintainer's decision.
+
 ## Open questions for the user
 
 - **Q1. CLI name.** Keep `mbtracectl`? **Answered 2026-10-15: yes, `mbtracectl`.**

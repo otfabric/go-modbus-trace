@@ -42,7 +42,9 @@ func (nullHandler) Close(*flow.Conn)                                 {}
 
 // Walk reads every packet of the trace once and tells fn which TCP
 // connection each belongs to (connection IDs are the same as Scan's). It
-// does not reassemble or frame; a sub-trace extractor uses it.
+// does not reassemble or frame; a sub-trace extractor uses it. fn is called
+// synchronously on the goroutine that runs the walk; an error from it stops
+// the walk and is returned.
 //
 // Packets come in file order, with one exception: the IP fragments of a
 // datagram are held until the fragment that completes it, and then given
@@ -81,7 +83,7 @@ type walker struct {
 func (w *walker) part(i int, pt *part, rc io.Reader) error {
 	ctx, lim, dec, tr, fn := w.ctx, w.lim, w.dec, w.tr, w.fn
 	done := ctx.Done()
-	rd, err := pcapio.NewReader(rc, pcapio.Options{MaxPacket: lim.MaxPacket})
+	rd, err := pcapio.NewReader(rc, lim.reader())
 	if err != nil {
 		return fmt.Errorf("%s: %w", pt.name(), err)
 	}

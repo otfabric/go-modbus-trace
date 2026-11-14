@@ -328,3 +328,74 @@ func FuzzDecodeResponse(f *testing.F) {
 		}
 	})
 }
+
+// TestAddressRange: a range that ends beyond address 65535 is warned about
+// (address_out_of_range) and recorded as sent; a range that ends at 65535 is
+// not. For every function with a range, at its largest quantity and at 1.
+func TestAddressRange(t *testing.T) {
+	be := func(v int) []byte { return []byte{byte(v >> 8), byte(v)} }
+	cat := func(parts ...[]byte) []byte { return bytes.Join(parts, nil) }
+	type pdu func(start, q int) []byte
+	read := func(fc byte) pdu { return func(start, q int) []byte { return cat([]byte{fc}, be(start), be(q)) } }
+	for _, c := range []struct {
+		name string
+		as   As
+		max  int // the function's largest quantity
+		pdu  pdu
+	}{
+		{"FC01 request", AsRequest, 2000, read(1)},
+		{"FC02 request", AsRequest, 2000, read(2)},
+		{"FC03 request", AsRequest, 125, read(3)},
+		{"FC04 request", AsRequest, 125, read(4)},
+		{"FC15 request", AsRequest, 1968, func(start, q int) []byte {
+			n := (q + 7) / 8
+			return cat([]byte{15}, be(start), be(q), []byte{byte(n)}, make([]byte, n))
+		}},
+		{"FC15 response", AsResponse, 1968, read(15)},
+		{"FC16 request", AsRequest, 123, func(start, q int) []byte {
+			return cat([]byte{16}, be(start), be(q), []byte{byte(2 * q)}, make([]byte, 2*q))
+		}},
+		{"FC16 response", AsResponse, 123, read(16)},
+		{"FC23 request, read range", AsRequest, 125, func(start, q int) []byte {
+			return cat([]byte{23}, be(start), be(q), be(0), be(1), []byte{2, 0, 0})
+		}},
+		{"FC23 request, write range", AsRequest, 121, func(start, q int) []byte {
+			return cat([]byte{23}, be(0), be(1), be(start), be(q), []byte{byte(2 * q)}, make([]byte, 2*q))
+		}},
+	} {
+		for _, q := range []int{1, 2, c.max - 1, c.max} {
+			for _, x := range []struct {
+				start int
+				warn  bool
+			}{{0, false}, {65535 - q, false}, {65536 - q, false}, {65537 - q, true}, {65535, q > 1}} {
+				if x.start > 65535 {
+					continue // one address: no start puts it beyond the last
+				}
+				v := Decode(c.as, c.pdu(x.start, q))
+				got := false
+				for _, w := range v.Warnings {
+					got = got || w == WarnAddress
+					if w != WarnAddress {
+						t.Errorf("%s, %d at %d: warning %s", c.name, q, x.start, w)
+					}
+				}
+				if got != x.warn {
+					t.Errorf("%s, %d at %d: address warning %v, want %v", c.name, q, x.start, got, x.warn)
+				}
+				found := false
+				for _, r := range v.Ranges {
+					found = found || (int(r.Start) == x.start && int(r.Count) == q)
+				}
+				if !found {
+					t.Errorf("%s, %d at %d: ranges %+v", c.name, q, x.start, v.Ranges)
+				}
+			}
+		}
+	}
+	// One address: the last one is in range, for the single writes too.
+	for _, p := range [][]byte{{5, 0xFF, 0xFF, 0xFF, 0}, {6, 0xFF, 0xFF, 0, 1}, {22, 0xFF, 0xFF, 0, 0, 0, 0}, {24, 0xFF, 0xFF}} {
+		if v := Decode(AsRequest, p); len(v.Warnings) != 0 {
+			t.Errorf("% x: warnings %v", p, v.Warnings)
+		}
+	}
+}

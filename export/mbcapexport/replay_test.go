@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -209,14 +210,24 @@ func TestReplayEndToEnd(t *testing.T) {
 	t.Run("replay", func(t *testing.T) {
 		c := serve(t, modbusctl, "server", "replay", "--input", site, "--before-first", "absent", "--missing", "exception",
 			"--speed", "1000", "--loops", "1")
-		time.Sleep(300 * time.Millisecond) // the 10 s capture plays in 10 ms; then the last values stay
-		got, err := c.ReadHoldingRegisters(ctx, unit, base, regs)
-		if err != nil {
-			t.Fatal(err)
+		// The 10 s capture plays in 10 ms; then the last values stay. The
+		// test does not guess how long that takes on this machine: it reads
+		// until the last values are there (each read is a round trip to the
+		// server, so the loop does not spin), or a deadline passes.
+		want := make([]uint16, regs)
+		for i := range want {
+			want[i] = value(polls-1, base+uint16(i))
 		}
-		for i, v := range got {
-			if a := base + uint16(i); v != value(polls-1, a) {
-				t.Errorf("register %d after the replay: %d, want %d", a, v, value(polls-1, a))
+		deadline := time.Now().Add(10 * time.Second)
+		var got []uint16
+		var err error
+		for reads := 1; ; reads++ {
+			got, err = c.ReadHoldingRegisters(ctx, unit, base, regs)
+			if err == nil && slices.Equal(got, want) {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("after %d reads in 10 s the replay does not serve the last values: %v, %v; want %v", reads, got, err, want)
 			}
 		}
 	})

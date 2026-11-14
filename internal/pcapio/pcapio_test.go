@@ -194,9 +194,90 @@ func TestPcapNGTimestamps(t *testing.T) {
 		{19, 10_000_000_000_000_000_000 - 1, 0, 999_999_999}, // largest decimal unit
 	}
 	for _, c := range cases {
-		if got := toNS(c.ts, c.resol, c.offset); got != c.want {
-			t.Errorf("toNS(%d, %#x, %d) = %d, want %d", c.ts, c.resol, c.offset, got, c.want)
+		if got, ok := toNS(c.ts, c.resol, c.offset); got != c.want || !ok {
+			t.Errorf("toNS(%d, %#x, %d) = %d, %v, want %d", c.ts, c.resol, c.offset, got, ok, c.want)
 		}
+	}
+}
+
+// TestPcapNGTimestampRange: a time is converted only when it fits in 64 bits
+// of nanoseconds; at and inside the limits it is exact, outside them the
+// conversion says so and nothing wraps.
+func TestPcapNGTimestampRange(t *testing.T) {
+	const (
+		lastSec  = math.MaxInt64 / 1_000_000_000 // 9223372036: its first 854,775,807 ns fit
+		lastFrac = math.MaxInt64 % 1_000_000_000
+		firstSec = -lastSec - 1 // -9223372037: its last 854,775,808 ns fit
+	)
+	cases := []struct {
+		name   string
+		resol  byte
+		ts     uint64
+		offset int64
+		want   int64
+		ok     bool
+	}{
+		{"seconds: the last one", 0, lastSec, 0, lastSec * 1e9, true},
+		{"seconds: one more", 0, lastSec + 1, 0, 0, false},
+		{"seconds: far beyond", 0, 20_000_000_000, 0, 0, false},
+		{"seconds: the largest count", 0, math.MaxUint64, 0, 0, false},
+		{"microseconds: the last one", 6, lastSec*1e6 + lastFrac/1000, 0, math.MaxInt64 - lastFrac%1000, true},
+		{"microseconds: one more", 6, lastSec*1e6 + lastFrac/1000 + 1, 0, 0, false},
+		{"microseconds: the largest count", 6, math.MaxUint64, 0, 0, false},
+		{"nanoseconds: the last but one", 9, math.MaxInt64 - 1, 0, math.MaxInt64 - 1, true},
+		{"nanoseconds: the last one", 9, math.MaxInt64, 0, math.MaxInt64, true},
+		{"nanoseconds: one more", 9, math.MaxInt64 + 1, 0, 0, false},
+		{"nanoseconds: 2^63 and some", 9, 1<<63 + 12345, 0, 0, false},
+		{"nanoseconds: the largest count", 9, math.MaxUint64, 0, 0, false},
+		{"2^-10 s: the last second and a half", 0x80 | 10, lastSec<<10 | 512, 0, lastSec*1e9 + 500_000_000, true},
+		{"2^-10 s: a fraction of the last second that does not fit", 0x80 | 10, lastSec<<10 | 1023, 0, 0, false},
+		{"2^-10 s: one second more", 0x80 | 10, (lastSec + 1) << 10, 0, 0, false},
+		{"2^-10 s: the largest count", 0x80 | 10, math.MaxUint64, 0, 0, false},
+		{"offset: up to the last second", 0, 36, lastSec - 36, lastSec * 1e9, true},
+		{"offset: one past it", 0, 37, lastSec - 36, 0, false},
+		{"offset: the largest", 6, 1_700_000_000_000_000, math.MaxInt64, 0, false},
+		{"offset: the largest, and the largest count", 0, math.MaxUint64, math.MaxInt64, 0, false},
+		{"offset: 2^40 seconds", 6, 1_700_000_000_000_000, 1 << 40, 0, false},
+		{"offset: back to 1970", 0, 100, -100, 0, true},
+		{"offset: before 1970", 6, 500_000, -2, -1_500_000_000, true},
+		{"offset: the first nanosecond", 9, 145_224_192, firstSec, math.MinInt64, true},
+		{"offset: one nanosecond before it", 9, 145_224_191, firstSec, 0, false},
+		{"offset: the first whole second", 0, 0, firstSec + 1, (firstSec + 1) * 1e9, true},
+		{"offset: one second before it", 0, 0, firstSec, 0, false},
+		{"offset: the smallest", 0, 0, math.MinInt64, 0, false},
+		{"offset: the smallest, undone by the count", 0, 1<<63 + 5, math.MinInt64, 5e9, true},
+		{"offset: the largest count less the smallest offset", 0, math.MaxUint64, math.MinInt64, 0, false},
+	}
+	for _, c := range cases {
+		got, ok := toNS(c.ts, c.resol, c.offset)
+		if ok != c.ok || (ok && got != c.want) || (!ok && got != 0) {
+			t.Errorf("%s: toNS(%d, %#x, %d) = %d, %v, want %d, %v", c.name, c.ts, c.resol, c.offset, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// TestTimeOutOfRange: a packet whose time does not fit is read without a
+// time and counted, sequentially and by its offset alike.
+func TestTimeOutOfRange(t *testing.T) {
+	var buf bytes.Buffer
+	w, _ := NewNgWriter(&buf, Section{}, []Interface{{LinkType: 1, TSResol: 9}})
+	_ = w.WritePacket(0, t0, 0, []byte("in range"))
+	_ = w.WritePacket(0, t0, 0, []byte("out of range"))
+	_ = w.Flush()
+	b := buf.Bytes()
+	_, _, pks, _ := readAll(t, b)
+	binary.LittleEndian.PutUint32(b[pks[1].Offset+12:], 0xFFFFFFFF) // timestamp, upper half
+	rd, got, _, err := readAll(t, b)
+	if err != nil || len(got) != 2 || !got[0].hasTime || got[0].timeNS != t0 || got[1].hasTime || got[1].timeNS != 0 ||
+		rd.Counters().BadTimestamps != 1 || rd.Interfaces()[0].Packets != 2 {
+		t.Fatalf("err %v, packets %+v, counters %+v", err, got, rd.Counters())
+	}
+	ix, err := NewIndex(bytes.NewReader(b), int64(len(b)), Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p, err := ix.ReadAt(bytes.NewReader(b), pks[1].Offset); err != nil || p.HasTime || p.TimeNS != 0 || string(p.Data) != "out of range" {
+		t.Errorf("by offset: %+v, %v", p, err)
 	}
 }
 

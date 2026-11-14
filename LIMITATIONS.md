@@ -14,7 +14,12 @@ What go-modbus-trace does not do, or what its results cannot show. Non-goals in 
 
 ## What a trace cannot show
 
-Results describe what the capture saw. Bounded tables can drop entries, and each limit has a counter for what it dropped, so read the quality counters along with the results.
+Results describe what the capture saw. Bounded tables can drop entries, and each limit has a counter for what it dropped, so read the quality counters along with the results. The limits and their defaults: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) section 2.
+
+- **A response is certain only when every request before it was captured.** When the request direction has a hole (a lost packet, or a request the capture never saw), a response that pairs with a request from before the hole is `uncertain`: it may answer a request that is not in the trace. Such transactions are in the timeline and are not exported to MBCAP.
+- **Times outside 1677 to 2262** cannot be held as nanoseconds: a pcapng packet stamped outside that range is read without a time (`reader.bad_timestamps`).
+- **`Scan` returns at most `Limits.MaxFlows` flows** (1,000,000), those of the connections that closed first; the others are counted (`connections.flows_dropped`). `Analyze` reports every connection as events.
+- **`File.Frames` reads with the default interface and section limits.** A pass run with larger `Limits.MaxInterfaces` or `Limits.MaxSections` can report packets on interfaces that `Frames` does not know; reading those back gives `ErrCorrupt`.
 
 ## Verification
 
@@ -29,3 +34,4 @@ Results describe what the capture saw. Bounded tables can drop entries, and each
 |---|---|
 | linux/amd64, linux/arm64, darwin/arm64, darwin/amd64, windows/amd64, windows/arm64 | yes, natively |
 | linux/arm (v7) | cross-compiled only, not executed |
+| linux/386 | the tests run every night (`nightly.yml`), without the race detector: the 32-bit run for linux/arm, whose `int` has the same width |

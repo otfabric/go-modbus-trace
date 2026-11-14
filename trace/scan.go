@@ -25,6 +25,10 @@ const maxInternalErrors = 100
 // with their Modbus assessment, ordered by flow ID. It frames MBAP in both
 // directions but does not pair or decode PDUs.
 //
+// The flow list is the result, so it grows with the number of connections
+// in the trace, up to Limits.MaxFlows; what the pass itself holds does not
+// grow with the trace.
+//
 // A damaged file ends the scan with the results so far and an error
 // wrapping ErrCorrupt. Cancelling ctx stops it between packets.
 func Scan(ctx context.Context, f *File, o ScanOptions) (*FileSummary, []Flow, error) {
@@ -54,7 +58,7 @@ func scan(ctx context.Context, f *File, o ScanOptions, hook aduHook, an *analysi
 		if err != nil {
 			return nil, nil, err
 		}
-		rd, err := pcapio.NewReader(rc, pcapio.Options{MaxPacket: lim.MaxPacket})
+		rd, err := pcapio.NewReader(rc, lim.reader())
 		if err != nil {
 			_ = rc.Close()
 			if len(f.parts) > 1 {
@@ -139,14 +143,15 @@ func tm(ns int64) *time.Time {
 }
 
 type scanner struct {
-	an    *analysis
-	hook  aduHook
-	o     ScanOptions
-	lim   Limits
-	sum   *FileSummary
-	flows []Flow
-	q     Quality
-	order uint32
+	an      *analysis
+	hook    aduHook
+	o       ScanOptions
+	lim     Limits
+	sum     *FileSummary
+	flows   []Flow
+	dropped uint64 // connections left out of flows by Limits.MaxFlows
+	q       Quality
+	order   uint32
 }
 
 // packet decodes one packet; a panic is recovered and counted.
@@ -154,6 +159,9 @@ func (sc *scanner) packet(dec *link.Decoder, tr *flow.Tracker, p *pcapio.Packet,
 	sc.guard(p.Frame, func() {
 		if dec.Decode(p.LinkType, p.Data, seg) == link.OK {
 			tr.Packet(p, seg)
+		}
+		if an := sc.an; an != nil && an.held > an.budget {
+			an.shed(tr) // between two packets: the tracker is not in the middle of one
 		}
 	})
 }
@@ -205,6 +213,7 @@ func (sc *scanner) finishPart(i int, pt *part, rd *pcapio.Reader) {
 	r.BadOptions += c.BadOptions
 	r.UnknownBlocks += c.UnknownBlocks
 	r.OtherFrames += c.OtherFrames
+	r.BadTimestamps += c.BadTimestamps
 	r.TruncatedTail = r.TruncatedTail || c.TruncatedTail
 	s.Inputs = append(s.Inputs, in)
 	// The top-level description: the input itself, or the inputs together.
@@ -233,11 +242,14 @@ func (sc *scanner) finish(dec *link.Decoder, tr *flow.Tracker) {
 	s.Fragments = Fragments{Reassembled: fr.Datagrams, Dropped: fr.Dropped, Incomplete: fr.Pending}
 	st := tr.Stats
 	s.Connections = ConnCounters{Total: st.Conns, Midstream: st.Midstream, Evicted: st.Evicted, Superseded: st.Superseded,
-		MaxTracked: st.MaxTracked, AfterClose: st.AfterClose}
+		MaxTracked: st.MaxTracked, AfterClose: st.AfterClose, FlowsDropped: sc.dropped}
 	q := sc.q
 	q.Retransmitted, q.OutOfOrder, q.OverlapConflicts = st.Retransmits, st.OutOfOrder, st.Conflicts
 	q.Keepalives, q.SYNRetransmits, q.Gaps, q.GapBytes = st.Keepalives, st.SYNRetrans, st.Gaps, st.GapBytes
 	q.ReassemblyOverflow, q.ReassemblyBudget = st.Overflows, st.BudgetGaps
+	if sc.an != nil {
+		q.AnalysisBudget = sc.an.freed
+	}
 	s.Quality = q
 	s.Snaplen.PayloadBytesCut = st.SnapBytes
 	sort.Slice(sc.flows, func(i, j int) bool { return sc.flows[i].ID < sc.flows[j].ID })
@@ -374,6 +386,13 @@ func (sc *scanner) Close(c *flow.Conn) {
 	}
 	if cs.a != nil {
 		cs.a.close()
+	}
+	if sc.an != nil {
+		return // Analyze reports connections as events: it keeps no flow list
+	}
+	if len(sc.flows) >= sc.lim.MaxFlows {
+		sc.dropped++
+		return
 	}
 	role := mbtcp.DecideRole(mbtcp.RoleInput{Endpoints: c.Endpoints, SYNFrom: c.SYNFrom, SYNACKFrom: c.SYNACKFrom,
 		ServerPorts: sc.o.ServerPorts, Servers: sc.o.Servers, Clients: sc.o.Clients, Samples: cs.samples})

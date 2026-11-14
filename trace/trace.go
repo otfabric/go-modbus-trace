@@ -29,7 +29,12 @@ var (
 	// ErrFormat reports an input that is neither pcap nor pcapng.
 	ErrFormat = pcapio.ErrFormat
 	// ErrCorrupt reports damage that ended the read; what was read before
-	// it is reported.
+	// it is reported. Damage is a record or block length that cannot be, a
+	// gzip input that does not decompress as stored (its checksum or length
+	// does not match, its data is damaged), a read of the input that fails,
+	// and a pcapng file with more sections than Limits.MaxSections. The
+	// error also wraps its cause where there is one (gzip.ErrChecksum, the
+	// read error).
 	ErrCorrupt = pcapio.ErrCorrupt
 	// ErrConsumed reports a second pass over a stream input.
 	ErrConsumed = errors.New("trace: a stream input can be read only once")
@@ -134,7 +139,10 @@ func (p *part) open() (io.ReadCloser, error) {
 	return os.Open(p.path)
 }
 
-// Limits bound memory. Zero values take the defaults.
+// Limits bound memory. Zero values take the defaults. What a pass holds at
+// most is the sum of the limits and the fixed state of the tracked
+// connections; it does not grow with the size of the trace
+// (docs/ARCHITECTURE.md section 2).
 type Limits struct {
 	MaxConns       int // tracked connections (100,000)
 	BufferPerDir   int // out-of-order bytes per direction (1 MiB)
@@ -142,7 +150,39 @@ type Limits struct {
 	ResyncScan     int // bytes scanned for a resync (64 KiB)
 	FragmentBudget int // IP fragment bytes held (16 MiB)
 	MaxPacket      int // largest captured packet read (256 KiB)
+	// AnalysisBudget bounds what Analyze holds between packets over all
+	// connections, in bytes (64 MiB): requests waiting for a response, ADUs
+	// held while a connection's roles are undecided, and the provenance of
+	// bytes being framed. Past it, the connection whose state was added to
+	// least recently gives up state: its roles are decided with what there
+	// is, then its oldest outstanding requests are decided unanswered and
+	// uncertain, and a connection that holds only partly framed bytes is
+	// closed as evicted. Counted in Quality.AnalysisBudget.
+	AnalysisBudget int
+	// MaxFlows bounds the flows Scan returns (1,000,000). The list is the
+	// result of Scan, so it grows with the number of connections in the
+	// trace, about 400 bytes each, up to this limit; the flows of
+	// connections that close after it is full are counted in
+	// ConnCounters.FlowsDropped and left out.
+	MaxFlows int
+	// MaxInterfaces bounds the interfaces kept from one input file, over
+	// all its pcapng sections (65,536). An Interface Description Block past
+	// it is skipped with the packets that name its interface, and counted
+	// in ReaderCounters.SkippedBlocks.
+	MaxInterfaces int
+	// MaxSections bounds the pcapng sections read from one input file
+	// (65,536). A Section Header Block past it ends the read with
+	// ErrCorrupt and the results so far.
+	MaxSections int
 }
+
+// The defaults of the limits that are not another package's. Each is chosen
+// well above what captures hold (docs/ARCHITECTURE.md section 2 says why).
+const (
+	defaultFragmentBudget = 16 << 20
+	defaultAnalysisBudget = 64 << 20
+	defaultMaxFlows       = 1_000_000
+)
 
 // DefaultLimits are the documented defaults.
 var DefaultLimits = Limits{
@@ -150,8 +190,12 @@ var DefaultLimits = Limits{
 	BufferPerDir:   flow.DefaultLimits.BufferPerDir,
 	BufferTotal:    flow.DefaultLimits.BufferTotal,
 	ResyncScan:     mbtcp.DefaultResyncLimit,
-	FragmentBudget: 16 << 20,
+	FragmentBudget: defaultFragmentBudget,
 	MaxPacket:      pcapio.DefaultMaxPacket,
+	AnalysisBudget: defaultAnalysisBudget,
+	MaxFlows:       defaultMaxFlows,
+	MaxInterfaces:  pcapio.DefaultMaxInterfaces,
+	MaxSections:    pcapio.DefaultMaxSections,
 }
 
 func (l Limits) withDefaults() Limits {
@@ -174,7 +218,24 @@ func (l Limits) withDefaults() Limits {
 	if l.MaxPacket <= 0 {
 		l.MaxPacket = d.MaxPacket
 	}
+	if l.AnalysisBudget <= 0 {
+		l.AnalysisBudget = d.AnalysisBudget
+	}
+	if l.MaxFlows <= 0 {
+		l.MaxFlows = d.MaxFlows
+	}
+	if l.MaxInterfaces <= 0 {
+		l.MaxInterfaces = d.MaxInterfaces
+	}
+	if l.MaxSections <= 0 {
+		l.MaxSections = d.MaxSections
+	}
 	return l
+}
+
+// reader returns the limits of the file reader.
+func (l Limits) reader() pcapio.Options {
+	return pcapio.Options{MaxPacket: l.MaxPacket, MaxInterfaces: l.MaxInterfaces, MaxSections: l.MaxSections}
 }
 
 // DefaultServerPorts are the ports taken as Modbus servers by default.

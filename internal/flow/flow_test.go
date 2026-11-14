@@ -243,3 +243,94 @@ func TestRepeat(t *testing.T) {
 		})
 	}
 }
+
+// TestAckedAhead: a direction is ahead when its peer acknowledged bytes the
+// capture has not delivered; a FIN's sequence number is not such a byte.
+func TestAckedAhead(t *testing.T) {
+	r := &recorder{}
+	tr := NewTracker(Limits{}, r)
+	conn := func() *Conn { return tr.conns[keyOf(netip.MustParseAddrPort(cl), netip.MustParseAddrPort(sv))] }
+	feed(tr,
+		pkt{cl, sv, 100, 0, link.SYN, ""},
+		pkt{sv, cl, 500, 101, link.SYN | link.ACK, ""},
+		pkt{cl, sv, 101, 501, link.ACK, "req1"},
+		pkt{sv, cl, 501, 105, link.ACK, "resp1"},
+	)
+	if c := conn(); c.AckedAhead(0) || c.AckedAhead(1) {
+		t.Fatal("ahead after a complete exchange")
+	}
+	// The server answers 4 client bytes the capture does not hold.
+	feed(tr, pkt{sv, cl, 506, 109, link.ACK, "resp2"})
+	if c := conn(); !c.AckedAhead(0) || c.AckedAhead(1) {
+		t.Fatalf("client direction ahead %v, server direction ahead %v", c.AckedAhead(0), c.AckedAhead(1))
+	}
+	// Data behind the hole declares the gap: nothing is ahead any more.
+	feed(tr, pkt{cl, sv, 109, 511, link.ACK, "req3"})
+	if conn().AckedAhead(0) {
+		t.Fatal("ahead after the gap was declared")
+	}
+	// The client's FIN is acknowledged: its sequence number is no data.
+	feed(tr,
+		pkt{cl, sv, 113, 511, link.FIN | link.ACK, ""},
+		pkt{sv, cl, 511, 114, link.ACK, "resp3"},
+	)
+	if conn().AckedAhead(0) {
+		t.Fatal("ahead after an acknowledged FIN")
+	}
+	// A direction without data, or without an acknowledgement, is never ahead.
+	tr2 := NewTracker(Limits{}, &recorder{})
+	feed(tr2, pkt{cl, sv, 100, 0, 0, "x"})
+	if c := tr2.conns[keyOf(netip.MustParseAddrPort(cl), netip.MustParseAddrPort(sv))]; c.AckedAhead(0) || c.AckedAhead(1) {
+		t.Fatal("ahead without an acknowledgement")
+	}
+}
+
+// TestOldSegmentDistances: a segment that lies before the next expected byte
+// is compared with the delivered tail whatever its distance, on platforms of
+// any int width. Distances are 32-bit sequence differences: up to 2^31 (plus
+// the segment's length) behind is old data, beyond that it is ahead.
+func TestOldSegmentDistances(t *testing.T) {
+	const (
+		start = 5000
+		sent  = "abcdefgh" // the delivered tail: TailKeep is its length
+		next  = start + uint32(len(sent))
+	)
+	cases := []struct {
+		name                           string
+		back                           uint32 // how far before next the segment starts
+		data                           string
+		retransmits, conflicts, probes uint64
+		held                           int
+	}{
+		{"1, one byte: a keepalive probe", 1, "h", 0, 0, 1, 0},
+		{"inside the tail, same bytes", 4, "efgh", 1, 0, 0, 0},
+		{"inside the tail, other bytes", 4, "efgX", 1, 1, 0, 0},
+		{"the whole tail", 8, sent, 1, 0, 0, 0},
+		{"the tail and one byte before it", 9, "?" + sent, 1, 0, 0, 0},
+		{"the tail and one byte before it, other bytes", 9, "?abcdXfgh", 1, 1, 0, 0},
+		{"wholly before the tail", 9, "?", 1, 0, 0, 0},
+		{"2^31-1", 1<<31 - 1, "wxyz", 1, 0, 0, 0},
+		{"2^31", 1 << 31, "wxyz", 1, 0, 0, 0},
+		{"2^31 and the segment's length, less one", 1<<31 + 3, "wxyz", 1, 0, 0, 0},
+		{"2^32-1: one byte ahead, held", 1<<32 - 1, "w", 0, 0, 0, 1},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := &recorder{}
+			tr := NewTracker(Limits{TailKeep: len(sent)}, r)
+			feed(tr,
+				pkt{cl, sv, start, 0, link.ACK, sent},
+				pkt{cl, sv, next - c.back, 0, link.ACK, c.data},
+			)
+			conn := tr.conns[keyOf(netip.MustParseAddrPort(cl), netip.MustParseAddrPort(sv))]
+			st := conn.Stats
+			if st.Retransmits != c.retransmits || st.Conflicts != c.conflicts || st.Keepalives != c.probes || len(conn.dirs[0].pend) != c.held {
+				t.Errorf("retransmits %d, conflicts %d, keepalives %d, held %d; want %d, %d, %d, %d",
+					st.Retransmits, st.Conflicts, st.Keepalives, len(conn.dirs[0].pend), c.retransmits, c.conflicts, c.probes, c.held)
+			}
+			if got := string(r.data["1/0"]); got != sent {
+				t.Errorf("delivered %q, want %q", got, sent)
+			}
+		})
+	}
+}

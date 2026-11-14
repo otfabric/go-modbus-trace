@@ -26,7 +26,9 @@ We will acknowledge your report within 48 hours and aim to provide a fix or miti
 
 ### Traces are hostile input
 
-A packet trace can come from anywhere, so every reader and decoder treats it as hostile: lengths and counts are capped, a malformed packet is counted and never fails the pass, a panic in one packet is recovered and reported, and memory stays bounded at default limits for any trace size (`docs/ARCHITECTURE.md` section 2). The readers, the link parser, the framer, the PDU decoders and the whole pipeline are fuzzed.
+A packet trace can come from anywhere, so every reader and decoder treats it as hostile: lengths and counts are capped, a malformed packet is counted and never fails the pass, a panic in one packet is recovered and reported, and what a pass holds is bounded by its limits for any trace size. The limits, their defaults, the reason for each value and what happens when one is reached are in one table (`docs/ARCHITECTURE.md` section 2): packet and block sizes; the interfaces, the sections and their text kept per file; tracked connections; reassembly buffers; IP fragments; the requests and the other state the analysis holds over all connections; the flows `Scan` returns. A pass holds at most the sum of them and the fixed state of the tracked connections. The work is bounded with the memory: reassembling fragments and holding out-of-order segments cost steps in proportion to the bytes, or to the logarithm of what is held, in whatever order they arrive. Each limit has a test that measures the heap or the work behind it against a budget (`docs/TESTING.md` section 3a), separate from the fuzzing. The readers, the link parser, the framer, the PDU decoders and the whole pipeline are fuzzed, and the fuzz target of the pcapng reader also reads every packet back by its offset and compares.
+
+What is not bounded by a limit: the number of input files of one trace is the caller's (each adds its own interfaces and sections to the summary), and a `Sink` keeps what it chooses to keep.
 
 ### Offline only
 
