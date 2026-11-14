@@ -1,5 +1,18 @@
 # go-modbus-trace Releases
 
+## v0.8.7
+
+**Date:** 2026-11-14
+**Previous release:** v0.8.6
+
+No API change.
+
+### Changed
+
+- Tests use go-modbus v1.15.3 (was v1.15.2): after a failed `Accept` the server waits before it tries again, a metrics hook that does not return normally is contained, an RTU request longer than a frame is refused before it is sent, and a request whose context ends while the deadline is set is not sent (go-modbus RELEASE.md, v1.15.3); the library does not import it outside tests. The previous release named go-modbus v1.15.2 for these changes; v1.15.2 was tagged without them (it holds go-serial v0.4.0 only), so they arrive with this release.
+
+---
+
 ## v0.8.6
 
 **Date:** 2026-11-14
