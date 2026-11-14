@@ -517,6 +517,10 @@
           "minimum": 0,
           "type": "integer"
         },
+        "flows_dropped": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "max_tracked": {
           "type": "integer"
         },
@@ -539,6 +543,7 @@
       },
       "required": [
         "evicted",
+        "flows_dropped",
         "max_tracked",
         "midstream",
         "packets_after_close",
@@ -832,6 +837,10 @@
     "trace.Quality": {
       "additionalProperties": false,
       "properties": {
+        "analysis_budget": {
+          "minimum": 0,
+          "type": "integer"
+        },
         "foreign_protocol": {
           "minimum": 0,
           "type": "integer"
@@ -890,6 +899,7 @@
         }
       },
       "required": [
+        "analysis_budget",
         "foreign_protocol",
         "gap_bytes",
         "gaps",
@@ -911,6 +921,10 @@
       "additionalProperties": false,
       "properties": {
         "bad_options": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "bad_timestamps": {
           "minimum": 0,
           "type": "integer"
         },
@@ -936,6 +950,7 @@
       },
       "required": [
         "bad_options",
+        "bad_timestamps",
         "other_frames",
         "simple_packets",
         "skipped_blocks",
