@@ -9,6 +9,6 @@ require (
 )
 
 require (
-	github.com/otfabric/go-serial v0.3.0 // indirect
+	github.com/otfabric/go-serial v0.4.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 )
