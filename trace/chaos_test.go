@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -567,5 +568,115 @@ func TestConcurrentUse(t *testing.T) {
 	wg.Wait()
 	if ok != 1 || consumed != 7 {
 		t.Errorf("%d passes read the stream, %d were refused", ok, consumed)
+	}
+}
+
+// TestChaosPairingTruth runs seeded scripts of read polls in which requests
+// and responses are lost to the capture, transaction IDs repeat, and some
+// requests are never answered. Every response carries the address of the
+// request it answers, so the truth is in the trace: a transaction decided ok
+// pairs a response with its own request. A pair the capture cannot vouch for
+// has another status.
+func TestChaosPairingTruth(t *testing.T) {
+	var certain atomic.Int64 // transactions decided ok, over all seeds
+	t.Cleanup(func() {
+		if !t.Failed() && certain.Load() == 0 {
+			t.Error("no transaction was decided ok: the scripts test nothing")
+		}
+	})
+	for _, seed := range chaosSeeds(t) {
+		t.Run(fmt.Sprint(seed), func(t *testing.T) {
+			t.Parallel()
+			rng := rand.New(rand.NewPCG(uint64(seed), 0x7A17))
+			var buf bytes.Buffer
+			b, err := tracetest.New(&buf, tracetest.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			type client struct {
+				c    *tracetest.Conn
+				mode int // 0: transaction ID 0 always; 1: counting; 2: counting, repeating some
+				tid  uint16
+			}
+			var clients []*client
+			for i := range 1 + rng.IntN(3) {
+				clients = append(clients, &client{mode: rng.IntN(3), tid: uint16(rng.IntN(65536)), c: b.Conn(tracetest.ConnOptions{
+					Client: netip.AddrPortFrom(netip.AddrFrom4([4]byte{10, 0, 0, byte(i + 1)}), 40000)})})
+			}
+			write := func(c *tracetest.Conn, d tracetest.Dir, lose bool, f tracetest.Frame) {
+				var wo tracetest.WriteOpts
+				if rng.IntN(3) == 0 {
+					wo.Seg = []int{1 + rng.IntN(10)} // the ADU in two segments
+				}
+				if lose {
+					wo.Lose = []int{0}
+					if len(wo.Seg) > 0 && rng.IntN(2) == 0 {
+						wo.Lose = []int{0, 1}
+					}
+				}
+				c.Write(d, wo, f)
+			}
+			for range 40 + rng.IntN(120) {
+				cl := clients[rng.IntN(len(clients))]
+				switch {
+				case cl.mode == 0:
+					cl.tid = 0
+				case cl.mode == 1 || rng.IntN(3) != 0:
+					cl.tid++
+				}
+				addr := uint16(rng.IntN(1000))
+				req := tracetest.Frame{TID: cl.tid, Unit: 1, PDU: tracetest.ReadRequest(3, addr, 2)}
+				resp := tracetest.Frame{TID: cl.tid, Unit: 1, PDU: tracetest.RegistersResponse(3, uint16(rng.IntN(65536)), addr)}
+				b.Advance(time.Duration(rng.IntN(3)) * time.Millisecond)
+				switch rng.IntN(10) {
+				case 0: // the request is not captured
+					write(cl.c, tracetest.ToServer, true, req)
+					write(cl.c, tracetest.ToClient, false, resp)
+				case 1: // the response is not captured
+					write(cl.c, tracetest.ToServer, false, req)
+					write(cl.c, tracetest.ToClient, true, resp)
+				case 2: // the device does not answer
+					write(cl.c, tracetest.ToServer, false, req)
+				case 3: // neither is captured
+					write(cl.c, tracetest.ToServer, true, req)
+					write(cl.c, tracetest.ToClient, true, resp)
+				default:
+					write(cl.c, tracetest.ToServer, false, req)
+					write(cl.c, tracetest.ToClient, false, resp)
+				}
+			}
+			for _, cl := range clients {
+				if rng.IntN(2) == 0 {
+					cl.c.Close()
+				}
+			}
+			if err := b.Close(); err != nil {
+				t.Fatal(err)
+			}
+			sum, evs, _, err := events(context.Background(), trace.OpenReader(bytes.NewReader(buf.Bytes())), trace.Options{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sum.InternalErrorCount > 0 {
+				t.Fatalf("internal errors: %+v", sum.InternalErrors)
+			}
+			ok := 0
+			for _, e := range evs {
+				x := e.Txn
+				if x == nil || x.Status != model.StatusOK {
+					continue
+				}
+				ok++
+				rq, rs := x.Request.PDU, x.Response.PDU
+				if len(rq) != 5 || len(rs) != 6 {
+					t.Fatalf("an ok transaction with PDUs %x and %x", rq, rs)
+				}
+				if asked, answered := uint16(rq[1])<<8|uint16(rq[2]), uint16(rs[4])<<8|uint16(rs[5]); asked != answered {
+					t.Errorf("transaction %d (connection %d, ID %d, flags %v) is ok, but the request reads address %d and the response answers address %d",
+						x.Seq, x.Conn, x.TID, x.Flags, asked, answered)
+				}
+			}
+			certain.Add(int64(ok))
+		})
 	}
 }

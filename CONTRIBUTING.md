@@ -28,7 +28,7 @@ Run `make` (or `make help`) for the full list of targets. `make interop` compare
 
 - **Offline only.** The library never captures live, never opens a socket and never reads the wall clock for anything it outputs. `depguard`, `forbidigo` and `internal/policy` enforce it.
 - **Pure Go**, `CGO_ENABLED=0`, on every target in the Makefile's `TARGETS`.
-- **Bounded memory** at default limits for any trace size: every table has a cap and a counter (`docs/ARCHITECTURE.md` section 2).
+- **Bounded memory** at default limits for any trace size: every table has a cap and a counter (`docs/ARCHITECTURE.md` section 2). A new limit comes with the reason for its default in that table and with a test that measures the heap or the work behind it against a budget (`docs/TESTING.md` section 3a).
 - **Hostile input:** readers and decoders never panic and never allocate beyond their limits; a new parser comes with a fuzz target.
 - **No customer traces** in the repository, ever (`testdata/README.md`).
 - **Ground truth, not self-comparison:** a new quality condition, reason code or flag comes with a synthetic scenario that produces it (`docs/TESTING.md`).

@@ -36,10 +36,25 @@ rep, err := mbcapexport.Export(ctx, f, trace.Options{}, mbcapexport.Options{Prod
 Rules that hold for every function: no network I/O, no wall clock (times are the trace's), the same input
 and options give the same events, a malformed packet is counted and never fails the pass, a panic in one
 packet (or in the flush at the end) is recovered and counted (`FileSummary.InternalErrorCount`) and reported
-as a note. Memory is bounded at default limits for any trace size. A `File` of paths is safe for concurrent
-passes and `Frames` calls; a stream `File` is read by one pass (`ErrConsumed` for the others).
+as a note. A `File` of paths is safe for concurrent passes and `Frames` calls; a stream `File` is read by one
+pass (`ErrConsumed` for the others).
+
+Memory: what a pass holds is bounded by `trace.Limits` (and `Options.MaxOutstanding`) for any trace size: at
+most the sum of the limits and the fixed state of the tracked connections (`docs/ARCHITECTURE.md` section 2
+has the table, with the reason for each default and its counter). `Analyze` keeps nothing of a connection
+that closed. The flow list `Scan` returns is its result and grows with the number of connections, about 450
+bytes each, up to `Limits.MaxFlows`.
+
+Callbacks: a `Sink`, a `Walk` function and `Progress` are called synchronously on the goroutine that runs the
+pass, one call at a time. An event belongs to the sink that receives it, with everything it points to: the
+library neither reads nor changes it afterwards. A `Frame` belongs to the caller of `Frames`; its `Payload`
+is a part of its `Data`, not a copy. A `RawPacket`'s `Data` is valid only during the `Walk` callback. A
+callback may call `Frames` and start other passes on the same `File`. A `Sink` call that does not return
+normally is contained like the decoding of a packet that does not: counted in `InternalErrorCount`, and the
+pass goes on without an error; return an error to stop a pass.
 
 Errors to test with `errors.Is`: `trace.ErrFormat`, `trace.ErrCorrupt` (a damaged file: the summary up to the
-damage is returned too), `trace.ErrNotSeekable`, `trace.ErrConsumed`, `trace.ErrNoInput`, `trace.ErrFrameRef`,
+damage is returned too, and `FileSummary.Error` has the text; the error also wraps its cause, for example
+`gzip.ErrChecksum` for a gzip file whose checksum does not match), `trace.ErrNotSeekable`, `trace.ErrConsumed`, `trace.ErrNoInput`, `trace.ErrFrameRef`,
 `mbcapexport.ErrOptions`, `mbcapexport.ErrWriter` (the capture library refused something: a bug),
 `subtrace.ErrTransactionSelection`, `timeline.ErrUnknownFormat`; a cancelled context gives `ctx.Err()`.

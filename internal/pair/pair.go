@@ -36,6 +36,7 @@ type ADU struct {
 type pending struct {
 	ADU
 	retried, ambiguous, gapTouched bool
+	requestGap                     bool // a gap hit the request direction while it waited
 }
 
 // Pairer pairs one connection. Emit receives every transaction.
@@ -70,11 +71,23 @@ func (p *Pairer) Request(a ADU) {
 		}
 	}
 	if len(p.out) >= p.o.MaxOutstanding {
-		old := p.out[0]
-		p.out = p.out[1:]
-		p.build(old, nil, model.StatusUnanswered, true) // pushed out: unanswered and uncertain
+		p.PushOut()
 	}
 	p.out = append(p.out, q)
+}
+
+// PushOut decides the oldest outstanding request now, unanswered and
+// uncertain: a limit has no room to wait for its response. It reports false
+// when no request is outstanding.
+func (p *Pairer) PushOut() bool {
+	if len(p.out) == 0 {
+		return false
+	}
+	old := p.out[0]
+	p.out[0] = nil // the list no longer holds it
+	p.out = p.out[1:]
+	p.build(old, nil, model.StatusUnanswered, true)
+	return true
 }
 
 // Response takes a response ADU: the oldest outstanding request with the
@@ -99,6 +112,7 @@ func (p *Pairer) Response(a ADU) {
 				}
 			}
 			keep = append(keep, p.out[i+1:]...)
+			clear(p.out[len(keep):]) // the list no longer holds what left it
 			p.out = keep
 			for _, x := range lost {
 				p.build(x, nil, model.StatusUnanswered, false)
@@ -125,6 +139,16 @@ func (p *Pairer) Lone(a ADU, request bool, status string, flags ...string) {
 func (p *Pairer) ResponseGap() {
 	for _, o := range p.out {
 		o.gapTouched = true
+	}
+}
+
+// RequestGap records a gap in the client-to-server direction: a request the
+// capture does not hold may have been sent in it. A response that then pairs
+// with a request outstanding now cannot be attributed to it with certainty,
+// so that transaction is uncertain (flag gap_adjacent).
+func (p *Pairer) RequestGap() {
+	for _, o := range p.out {
+		o.requestGap = true
 	}
 }
 
@@ -184,7 +208,7 @@ func (p *Pairer) build(q *pending, resp *ADU, status string, uncertain bool, ext
 		if q.retried {
 			set[model.FlagRetried] = true
 		}
-		if q.gapTouched {
+		if q.gapTouched || (q.requestGap && resp != nil) {
 			set[model.FlagGapAdjacent] = true
 		}
 		if q.ambiguous && status != model.StatusUnanswered {

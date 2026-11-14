@@ -35,7 +35,12 @@ var (
 	// ErrFormat reports an input that is neither pcap nor pcapng.
 	ErrFormat = pcapio.ErrFormat
 	// ErrCorrupt reports damage that ended the read; what was read before
-	// it is reported.
+	// it is reported. Damage is a record or block length that cannot be, a
+	// gzip input that does not decompress as stored (its checksum or length
+	// does not match, its data is damaged), a read of the input that fails,
+	// and a pcapng file with more sections than Limits.MaxSections. The
+	// error also wraps its cause where there is one (gzip.ErrChecksum, the
+	// read error).
 	ErrCorrupt = pcapio.ErrCorrupt
 	// ErrConsumed reports a second pass over a stream input.
 	ErrConsumed = errors.New("trace: a stream input can be read only once")
@@ -52,8 +57,12 @@ var DefaultLimits = Limits{
 	BufferPerDir:   flow.DefaultLimits.BufferPerDir,
 	BufferTotal:    flow.DefaultLimits.BufferTotal,
 	ResyncScan:     mbtcp.DefaultResyncLimit,
-	FragmentBudget: 16 << 20,
+	FragmentBudget: defaultFragmentBudget,
 	MaxPacket:      pcapio.DefaultMaxPacket,
+	AnalysisBudget: defaultAnalysisBudget,
+	MaxFlows:       defaultMaxFlows,
+	MaxInterfaces:  pcapio.DefaultMaxInterfaces,
+	MaxSections:    pcapio.DefaultMaxSections,
 }
 ```
 
@@ -87,6 +96,8 @@ func Scan(ctx context.Context, f *File, o ScanOptions) (*FileSummary, []Flow, er
 
 Scan reads the whole trace once and returns its summary and its TCP flows with their Modbus assessment, ordered by flow ID. It frames MBAP in both directions but does not pair or decode PDUs.
 
+The flow list is the result, so it grows with the number of connections in the trace, up to Limits.MaxFlows; what the pass itself holds does not grow with the trace.
+
 A damaged file ends the scan with the results so far and an error wrapping ErrCorrupt. Cancelling ctx stops it between packets.
 
 ### func Walk
@@ -95,7 +106,7 @@ A damaged file ends the scan with the results so far and an error wrapping ErrCo
 func Walk(ctx context.Context, f *File, o ScanOptions, fn func(p *RawPacket) error) error
 ```
 
-Walk reads every packet of the trace once and tells fn which TCP connection each belongs to (connection IDs are the same as Scan's). It does not reassemble or frame; a sub-trace extractor uses it.
+Walk reads every packet of the trace once and tells fn which TCP connection each belongs to (connection IDs are the same as Scan's). It does not reassemble or frame; a sub-trace extractor uses it. fn is called synchronously on the goroutine that runs the walk; an error from it stops the walk and is returned.
 
 Packets come in file order, with one exception: the IP fragments of a datagram are held until the fragment that completes it, and then given to fn, with the datagram's connection, just before it. Fragments of a datagram that never completes (or that the fragment budget dropped) come at the end of their file (or earlier, when the fragment budget lets them go) with Conn 0.
 
@@ -107,10 +118,14 @@ Packets come in file order, with one exception: the IP fragments of a datagram a
 type ConnCounters struct {
 	Total      uint64 `json:"total"`               // connection epochs
 	Midstream  uint64 `json:"midstream"`           // without a captured handshake
-	Evicted    uint64 `json:"evicted"`             // dropped from a full table (Limits.MaxConns), least recently seen first
+	Evicted    uint64 `json:"evicted"`             // dropped from a full table (Limits.MaxConns), least recently seen first, or closed by Limits.AnalysisBudget
 	Superseded uint64 `json:"superseded"`          // ended by a new epoch of the same 4-tuple
 	MaxTracked int    `json:"max_tracked"`         // most connections tracked at once
 	AfterClose uint64 `json:"packets_after_close"` // packets of a connection after its FIN or RST (final ACKs)
+	// FlowsDropped counts the connections that are not in the flow list
+	// Scan returned because it was full (Limits.MaxFlows); 0 for Analyze,
+	// which keeps no list.
+	FlowsDropped uint64 `json:"flows_dropped"`
 }
 ```
 
@@ -157,6 +172,8 @@ func (f *File) Frames(refs []model.FrameRef) ([]Frame, error)
 ```
 
 Frames re-reads the referenced packets of uncompressed trace files by their offsets, so an application can show raw bytes without keeping them. It is safe for concurrent use.
+
+A packet read back has the link type and time the pass that reported it gave it. For a pcapng file the first call reads the file once, with the default Limits.MaxInterfaces and Limits.MaxSections, to learn its sections and interfaces as a pass does; later calls read only the packets. A reference is the caller's: one whose offset is not the start of a packet gives an error wrapping ErrCorrupt, and one whose payload range is not inside its packet gives the Frame without Payload.
 
 #### func (File) Name
 
@@ -216,10 +233,13 @@ type FileSummary struct {
 	// error.
 	TSOSegments uint64 `json:"tso_segments"`
 	// InternalErrors are recovered panics, the first 100 of
-	// InternalErrorCount; a non-zero count is a bug worth reporting.
+	// InternalErrorCount; a non-zero count is a bug worth reporting: in the
+	// library, or in the caller's Sink when it was a call of the sink that
+	// did not return normally.
 	InternalErrors     []InternalError `json:"internal_errors,omitempty"`
 	InternalErrorCount uint64          `json:"internal_error_count,omitempty"`
-	// Error is set when the read ended early on a damaged file.
+	// Error is set when the read ended early on a damaged file: the text
+	// of the error the pass returned (it wraps ErrCorrupt).
 	Error string `json:"error,omitempty"`
 	// Transactions and TransactionFlags count the transactions by status
 	// and by quality flag (Analyze only).
@@ -237,6 +257,10 @@ func Analyze(ctx context.Context, f *File, o Options, sink Sink) (*FileSummary, 
 ```
 
 Analyze reads the whole trace once and sends its events to sink: connections, transactions (paired, decoded and validated), gaps, resyncs and notes, in order of determination. Consumers sort transactions by their request time. It returns the file summary, with the transaction counters.
+
+What Analyze holds does not grow with the size of the trace: it keeps nothing of a connection that closed, and what open connections hold is bounded by Limits (MaxConns, the reassembly buffers, AnalysisBudget) and MaxOutstanding.
+
+A damaged file ends the pass with the events and the summary so far and an error wrapping ErrCorrupt, as for Scan.
 
 ### type Flow
 
@@ -300,11 +324,11 @@ type Frame struct {
 	TimeNS   int64          // packet time, nanoseconds since 1970
 	OrigLen  uint32         // length on the wire; more than len(Data) when the snap length cut it
 	Data     []byte         // the captured packet
-	Payload  []byte         // the ADU bytes this packet carried; nil after IP reassembly
+	Payload  []byte         // the ADU bytes this packet carried; nil after IP reassembly, or when the reference's payload range is not inside the packet
 }
 ```
 
-Frame is one packet read back by reference.
+Frame is one packet read back by reference. It belongs to the caller: Data is newly read for every Frames call, and Payload is the part of Data that the reference names (the same bytes, not a copy).
 
 ### type Input
 
@@ -350,7 +374,7 @@ type InternalError struct {
 }
 ```
 
-InternalError is a recovered panic while decoding one packet (Frame 0: while flushing at the end of the trace).
+InternalError is a recovered panic while decoding one packet (Frame 0: while flushing at the end of the trace); a Sink call for that packet that did not return normally is recorded the same way.
 
 ### type Limits
 
@@ -362,10 +386,34 @@ type Limits struct {
 	ResyncScan     int // bytes scanned for a resync (64 KiB)
 	FragmentBudget int // IP fragment bytes held (16 MiB)
 	MaxPacket      int // largest captured packet read (256 KiB)
+	// AnalysisBudget bounds what Analyze holds between packets over all
+	// connections, in bytes (64 MiB): requests waiting for a response, ADUs
+	// held while a connection's roles are undecided, and the provenance of
+	// bytes being framed. Past it, the connection whose state was added to
+	// least recently gives up state: its roles are decided with what there
+	// is, then its oldest outstanding requests are decided unanswered and
+	// uncertain, and a connection that holds only partly framed bytes is
+	// closed as evicted. Counted in Quality.AnalysisBudget.
+	AnalysisBudget int
+	// MaxFlows bounds the flows Scan returns (1,000,000). The list is the
+	// result of Scan, so it grows with the number of connections in the
+	// trace, about 400 bytes each, up to this limit; the flows of
+	// connections that close after it is full are counted in
+	// ConnCounters.FlowsDropped and left out.
+	MaxFlows int
+	// MaxInterfaces bounds the interfaces kept from one input file, over
+	// all its pcapng sections (65,536). An Interface Description Block past
+	// it is skipped with the packets that name its interface, and counted
+	// in ReaderCounters.SkippedBlocks.
+	MaxInterfaces int
+	// MaxSections bounds the pcapng sections read from one input file
+	// (65,536). A Section Header Block past it ends the read with
+	// ErrCorrupt and the results so far.
+	MaxSections int
 }
 ```
 
-Limits bound memory. Zero values take the defaults.
+Limits bound memory. Zero values take the defaults. What a pass holds at most is the sum of the limits and the fixed state of the tracked connections; it does not grow with the size of the trace (docs/ARCHITECTURE.md section 2).
 
 ### type Options
 
@@ -404,6 +452,7 @@ type Quality struct {
 	GapBytes           uint64 `json:"gap_bytes"`           // bytes in those holes, where the sequence numbers tell
 	ReassemblyOverflow uint64 `json:"reassembly_overflow"` // gaps declared by Limits.BufferPerDir
 	ReassemblyBudget   uint64 `json:"reassembly_budget"`   // gaps declared by Limits.BufferTotal
+	AnalysisBudget     uint64 `json:"analysis_budget"`     // times Limits.AnalysisBudget freed state: roles decided early, a request decided unanswered and uncertain, a connection closed as evicted
 	Resyncs            uint64 `json:"resyncs"`             // framing resynchronisations
 	ResyncFailed       uint64 `json:"resync_failed"`       // resyncs that found no header within Limits.ResyncScan
 	JunkBytes          uint64 `json:"junk_bytes"`          // bytes of TCP payload that framed as nothing
@@ -439,11 +488,16 @@ RawPacket is one captured packet, as Walk sees it. Data is valid only during the
 ```go
 type ReaderCounters struct {
 	SimplePackets uint64 `json:"simple_packets"` // no timestamp: used for flow state, never for timing
-	SkippedBlocks uint64 `json:"skipped_blocks"` // damaged pcapng blocks with a plausible length
+	SkippedBlocks uint64 `json:"skipped_blocks"` // pcapng blocks skipped: damaged ones with a plausible length, interface blocks past Limits.MaxInterfaces, and packets that name no interface kept
 	UnknownBlocks uint64 `json:"unknown_blocks"`
-	BadOptions    uint64 `json:"bad_options"`  // pcapng option areas that did not parse (ignored), or an invalid if_tsresol
+	BadOptions    uint64 `json:"bad_options"`  // pcapng option areas that did not parse (ignored), an invalid if_tsresol, or option text past the 16 MiB kept per input
 	OtherFrames   uint64 `json:"other_frames"` // custom and journal blocks Wireshark numbers as frames
 	TruncatedTail bool   `json:"truncated_tail"`
+	// BadTimestamps counts pcapng packets whose time, with the interface's
+	// resolution and offset, does not fit in 64-bit nanoseconds (before
+	// 1677 or after 2262). They are read without a time, like simple
+	// packets: used for flow state, never for timing.
+	BadTimestamps uint64 `json:"bad_timestamps"`
 }
 ```
 
@@ -492,6 +546,10 @@ type Sink interface {
 ```
 
 Sink receives events in order of determination. An error stops the pass.
+
+Event is called synchronously on the goroutine that runs the pass, one call at a time: a sink needs no locking of its own, and a slow sink only slows the pass down. The event and everything it points to belong to the sink from the call on: the library neither reads nor changes them afterwards, so a sink may keep them and may change them. A sink may call File.Frames and start other passes on the same File.
+
+Event must return normally. A call that does not is contained like the decoding of a packet that does not: it is counted and listed in FileSummary.InternalErrors, what that packet still had to deliver may be lost, and the pass goes on and returns no error for it. To stop a pass, return an error.
 
 ### type SinkFunc
 

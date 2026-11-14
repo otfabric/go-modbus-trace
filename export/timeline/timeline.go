@@ -107,7 +107,7 @@ type sink struct {
 	held    int // bytes of encoded rows in q
 	newest  time.Time
 	emitted time.Time
-	conns   map[uint32]bool // connections whose events are selected
+	conns   map[uint32]bool // open connections: whether their events are selected
 }
 
 func (s *sink) Event(e *model.Event) error {
@@ -165,6 +165,10 @@ func (s *sink) selected(e *model.Event) bool {
 		return sel.Match(e.Txn)
 	case e.Conn != nil:
 		ok := sel.MatchConn(e.Conn.ID, e.Conn.Client, e.Conn.Server)
+		if e.Kind == model.KindConnClose {
+			delete(s.conns, e.Conn.ID) // its last event: nothing of the connection is kept
+			return ok
+		}
 		if s.conns == nil {
 			s.conns = map[uint32]bool{}
 		}

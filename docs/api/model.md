@@ -18,7 +18,7 @@ const (
 	StatusOrphan     = "orphan_response" // no outstanding request: midstream start or a lost request
 	StatusAmbiguous  = "ambiguous"       // several outstanding requests with the same key and different PDUs
 	StatusMalformed  = "malformed"       // empty, cut by the snap length, or a foreign protocol: reported alone
-	StatusUncertain  = "uncertain"       // touched by a gap or a resync, or the roles are unknown
+	StatusUncertain  = "uncertain"       // touched by a gap or a resync, the roles are unknown, or a limit decided it before its response could come
 )
 ```
 
@@ -39,6 +39,12 @@ const (
 	// transactions: the two do not line up.
 	FlagRetransmitted = "retransmitted"
 	FlagOutOfOrder    = "out_of_order"
+	// FlagGapAdjacent marks a transaction a gap touched: an ADU of it is
+	// the first of its direction after a gap; or its request waited while a
+	// gap hit the response direction (its response may have been in it); or
+	// its response came after a hole in the request direction that opened
+	// while the request waited (the response may answer a request the
+	// capture does not hold). Such a transaction is uncertain.
 	FlagGapAdjacent   = "gap_adjacent"
 	FlagResynced      = "resynced"
 	FlagSnaplen       = "snaplen_truncated"
@@ -142,7 +148,7 @@ type Event struct {
 }
 ```
 
-Event is one event; exactly one payload is set.
+Event is one event; exactly one payload is set. An event handed to a trace.Sink belongs to that sink, with everything it points to.
 
 ### type FrameRef
 

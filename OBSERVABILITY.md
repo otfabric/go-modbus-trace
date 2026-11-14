@@ -5,7 +5,8 @@ The library logs nothing and has no metrics hooks: it analyses a file and return
 | What | Where |
 |---|---|
 | TCP and framing problems in the trace | `trace.Quality`: retransmissions, out-of-order segments, gaps, reassembly overflow and budget, resyncs, junk bytes, foreign frames, ADUs cut by the snap length |
-| Entries dropped at a bounded table | a counter for each limit in `trace.Limits` ([LIMITATIONS.md](LIMITATIONS.md)) |
+| Entries dropped at a bounded table | a counter for each limit in `trace.Limits` ([LIMITATIONS.md](LIMITATIONS.md)): `connections.evicted`, `connections.flows_dropped`, `quality.reassembly_overflow`, `quality.reassembly_budget`, `quality.analysis_budget`, `fragments.dropped`, `reader.skipped_blocks`, `reader.bad_options`; the table is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) section 2 |
+| A file that was not read to its end, or not as stored | `FileSummary.Error` (with an error wrapping `trace.ErrCorrupt`), `reader.truncated_tail`, `reader.bad_timestamps` |
 | What an MBCAP export left out | `mbcapexport.Report`; see [docs/MBCAP-EXPORT.md](docs/MBCAP-EXPORT.md) |
 | Capture drops, interfaces, snap length | `mbtracectl info` |
 

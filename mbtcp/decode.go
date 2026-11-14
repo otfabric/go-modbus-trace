@@ -81,6 +81,7 @@ const (
 	WarnTruncated      = "truncated"       // shorter than the function's fixed part
 	WarnLength         = "length_mismatch" // longer or shorter than its fields say
 	WarnQuantity       = "quantity_out_of_range"
+	WarnAddress        = "address_out_of_range" // the range starts in the 16-bit address space and ends beyond it
 	WarnByteCount      = "byte_count_mismatch"
 	WarnCoilValue      = "coil_value" // FC05 value not 0xFF00 or 0x0000
 	WarnExceptionCode  = "unknown_exception_code"
@@ -152,7 +153,13 @@ func (d *dec) raw(name string, off, n int) {
 	d.v.Fields = append(d.v.Fields, Field{Name: name, Offset: HeaderLen + off, Length: n, Hex: hex.EncodeToString(d.p[off : off+n])})
 }
 
+// rng records the range a PDU touches. A range that ends beyond address
+// 65535 is recorded as it was sent and warned about: a device answers such a
+// request with exception 02 (illegal data address).
 func (d *dec) rng(s Space, start, count uint16, write bool) {
+	if int(start)+int(count) > 1<<16 {
+		d.warn(WarnAddress)
+	}
 	d.v.Ranges = append(d.v.Ranges, Range{Space: s, Start: start, Count: count, Write: write})
 }
 

@@ -1,5 +1,65 @@
 # go-modbus-trace Releases
 
+## v0.9.0
+
+**Date:** 2026-11-14
+**Previous release:** v0.8.7
+
+The exported API only grows (new fields of `trace.Limits` and of the summary's counters, one warning code). Some results change; each change is listed under Breaking with the way to keep the old result where there is one.
+
+### Breaking
+
+- **A response across a hole in the request direction is `uncertain`.** When the request direction of a connection has a hole (a gap is declared there, or the packet that carries a response acknowledges request bytes the capture has not delivered), a response that pairs with a request that was already waiting is reported `uncertain` with the flag `gap_adjacent`; it was `ok` or `exception`. The capture cannot tell whether the response answers that request or one it does not hold, which a client that reuses a transaction ID (or always sends 0) makes possible. The MBCAP export leaves such a transaction out (reason `uncertain`). A request that gets no response stays `unanswered`. There is no option for the old result; the event still carries both ADUs for a consumer that decides otherwise.
+- **A gzip trace that does not decompress as stored ends the pass with an error.** A checksum or length that does not match (`gzip.ErrChecksum`; every packet was read by then), damaged compressed data, and a read of the input that fails end the pass with an error that wraps `trace.ErrCorrupt` and the cause, and set `FileSummary.Error`; before, the pass returned no error. The summary, the flows and the events that come with the error are what the pass returned before, so a caller that wants the old result uses them and ignores an error for which `errors.Is(err, trace.ErrCorrupt)` holds. A gzip stream that stops early is still a truncated tail (`reader.truncated_tail`) and no error.
+- **A pcapng packet whose time does not fit is read without a time.** A timestamp that, with the interface's `if_tsresol` and `if_tsoffset`, lies outside what 64 bits of nanoseconds hold (1677-09-21 to 2262-04-11) leaves the packet without a time, as a Simple Packet Block has none: it is used for flow state, not for timing, and counted in the new `reader.bad_timestamps`. Before, the packet carried another time. There is no option for the old result.
+- **A range that ends beyond address 65535 is warned about.** FC01-04, 15, 16 and 23 requests and the write-multiple responses whose start and quantity pass the end of the address space get the new warning `address_out_of_range` (`mbtcp.WarnAddress`), and their transaction the flag `invalid_pdu`. In an MBCAP export such a read is excluded as `invalid_pdu` (an `ok` one was excluded as `response_mismatch`; an exception answer to it was written). A consumer that wants the old view ignores the warning code; the export has no option for it.
+- **`Scan` returns at most `Limits.MaxFlows` flows** (default 1,000,000): those of the connections that closed first. The others are counted in the new `connections.flows_dropped`. Set `Limits.MaxFlows` to `math.MaxInt` for a list without a limit.
+- **What `Analyze` holds between packets is limited over all connections** by `Limits.AnalysisBudget` (default 64 MiB; a waiting read request is charged about 1.1 KiB, so about 60,000 requests can wait at once). Past it the connection whose state was added to least recently gives up state: its roles are decided with what there is, then its oldest waiting requests are decided `unanswered` and `uncertain`, one at a time; when only partly framed bytes are left, the connection that held them longest is closed as `evicted`. Each step counts in the new `quality.analysis_budget`. Set `Limits.AnalysisBudget` to `math.MaxInt` for no limit.
+- **The interfaces and sections kept from one input file are limited.** A pcapng Interface Description Block past `Limits.MaxInterfaces` (default 65,536, over all sections of the file) is skipped with the packets that name its interface (`reader.skipped_blocks`); a Section Header Block past `Limits.MaxSections` (default 65,536) ends the read with `trace.ErrCorrupt` and the results so far. Set either to `math.MaxInt` for no limit. The text of interface and section options (names, descriptions, comments) is kept up to 16 MiB per file; text past that is left out and counted in `reader.bad_options`, and this limit has no option.
+- **IP fragments are charged differently against `Limits.FragmentBudget`.** A datagram being reassembled is charged its bytes up to the furthest one held, 2 bytes per 8-byte block and 448 for itself; before, every fragment was charged its bytes and 64, and a datagram 128. A trace that reaches the budget may therefore drop other datagrams than before (`fragments.dropped`); raise `Limits.FragmentBudget` to hold more. A last fragment that ends before bytes already held for its datagram is counted `fragment_bad`; it was held.
+
+### Added
+
+- `trace.Limits`: `AnalysisBudget`, `MaxFlows`, `MaxInterfaces`, `MaxSections` (in `trace.DefaultLimits` too); zero takes the default, as for the other limits.
+- Counters in the file summary: `quality.analysis_budget` (`Quality.AnalysisBudget`), `connections.flows_dropped` (`ConnCounters.FlowsDropped`), `reader.bad_timestamps` (`ReaderCounters.BadTimestamps`). `reader.skipped_blocks` and `reader.bad_options` also count what the new reader limits leave out. The JSON schemas `summary-1`, `file-summary-1` and `info-1`, generated from the library that `mbtracectl` pins, gain them with the pin bump.
+- `mbtcp.WarnAddress` (`address_out_of_range`).
+- The limits table of `docs/ARCHITECTURE.md` section 2 says for every limit why its default has the value it has, and states what a pass holds at most.
+
+### Fixed
+
+- `File.Frames` gives a packet the link type and time the pass that reported it gave it, also in a pcapng file in which that pass skipped an Interface Description Block (a damaged one, or one past the interface limit). The index of a pcapng file is now built by the sequential reader itself, in one read of the file on the first call, so it holds the sections and interfaces a pass sees; a call no longer copies the interface table. A reference to a block whose trailing length disagrees with its leading one gives `ErrCorrupt`, as a pass skips such a block.
+- `File.Frames` gives a `Frame` without `Payload` for a reference whose payload range is not inside its packet, also for a negative length; the range is compared in 64 bits.
+- On platforms where `int` has 32 bits, a segment that starts 2^31 bytes or more before the next expected byte of its direction is compared with the delivered bytes like any other old segment, and counted as a retransmission.
+
+### Changed
+
+- `Analyze` keeps nothing of a connection that closed (it built the flow list of `Scan` and dropped it at the end), and `timeline.Write` forgets a connection at its `conn.close`: what they hold no longer grows with the number of connections in the trace.
+- Reassembling IP fragments costs work in proportion to the fragments' bytes, however many fragments, copies and overlaps a datagram gets, and a datagram holds at most its own length. The result is the same: the lower offset wins an overlap, of two fragments with the same offset the first.
+- Holding out-of-order segments, delivering them and finding the direction that gives up its hole when `Limits.BufferTotal` is reached each cost a number of steps that grows with the logarithm of what is held, in whatever order segments arrive. The results are the same, also which direction gives up (of several that hold the same, the connection seen most recently).
+- A direction keeps the provenance of the bytes its framer can still frame (267 bytes back), not of bytes it passed over.
+- The list of requests waiting for a response lets go of a request when it is decided.
+- `trace.Sink`, `trace.Frame`, `model.Event` and `File.Frames` document who owns what and how callbacks are called: an event belongs to the sink, a frame to the caller, callbacks run synchronously on the goroutine of the pass. A `Sink` call that does not return normally is contained and counted as before (`internal_errors`); the documentation now says so.
+- `export/mbcapexport` is built on go-modbus-capture v0.2.2 (was v0.2.1): a data block of an exported file ends after 65,536 samples at the latest, and an export stops with an error before the index of the file grows past what a reader accepts (go-modbus-capture RELEASE.md, v0.2.2).
+- Tests use go-modbus v1.16.0 (was v1.15.3); the library does not import it outside tests.
+
+### Tests
+
+- Pairing: `TestResponseAfterRequestGap` (`trace` and `export/mbcapexport`), `TestAckedAhead`, and `TestChaosPairingTruth`: seeded scripts with lost requests and responses and repeated transaction IDs in which every response carries the address of its request, so a transaction decided `ok` must pair a response with its own request (3000 seeds every night).
+- One budget test per limit, in the normal tier: each measures the live heap or the steps taken against a budget derived from the limit (`docs/TESTING.md` section 3a): `TestMaxConnsHeap`, `TestBufferBudgetHeap`, `TestHoldWork`, `TestFragmentBudgetHeap`, `TestDefragWork`, `TestMaxOutstandingHeap`, `TestAnalysisBudget`, `TestAnalysisBudgetUndecidedRoles`, `TestAnalysisBudgetChunks`, `TestAnalyzeKeepsNoFlowList`, `TestMaxFlows`, `TestMetadataBudget`, `TestSizeLimits`, `TestFramesAllocation`, `TestConnectionsAreForgotten`, `TestReorderBufferHeap`.
+- Boundary tables: `TestPcapNGTimestampRange`, `TestOldSegmentDistances`, `TestFramesPayloadRange`, `TestAddressRange`, `TestInterfaceLimit`, `TestSectionLimit`, `TestTextLimit`, `TestDefragInvalid`.
+- `TestDefragAgainstModel` compares fragment reassembly with the rule written out byte by byte over seeded sequences. `FuzzPcapReader` and `FuzzPcapngReader` read every packet back by its offset and require the packet the sequential read gave; a corpus entry holds the empty last record.
+- `TestGzipDamage` (`internal/pcapio`, `trace`): a checksum and a length that do not match, damaged compressed data, a stream that stops early.
+- Ownership and callbacks: `TestEventsBelongToTheSink`, `TestFramesBelongToTheCaller`, `TestCallbacksUseTheFile`, `TestFramerCloseTwice`; the contract matrix is `docs/TESTING.md` section 3b.
+- `TestReplayEndToEnd` reads until the replay serves its last values, within a deadline, instead of waiting a fixed time.
+- `nightly.yml` runs every test on linux/386 (`GOARCH=386 go test ./...`), where `int` has 32 bits.
+
+### Known limitations
+
+- `mbtracectl` is a nested module pinned to the library v0.8.7: its binaries of this release behave as v0.8.7. The release that moves the pin regenerates the JSON schemas (the new counters) and the golden output hashes of `testdata/plant.outputs.json`.
+- `File.Frames` builds its index with the default interface and section limits (`LIMITATIONS.md`).
+
+---
+
 ## v0.8.7
 
 **Date:** 2026-11-14

@@ -137,3 +137,23 @@ func TestDecideRole(t *testing.T) {
 		t.Errorf("override: %+v", r)
 	}
 }
+
+// TestFramerCloseTwice: Close flushes what is left once; a second Close
+// reports nothing more.
+func TestFramerCloseTwice(t *testing.T) {
+	for _, in := range [][]byte{
+		mbap(1, 0, 1, read...)[:9],     // an ADU cut short
+		bytes.Repeat([]byte{0xEE}, 10), // bytes that frame as nothing
+		nil,
+	} {
+		var r rec
+		f := NewFramer(0, &r)
+		f.Write(0, in)
+		f.Close()
+		first := len(r.out)
+		f.Close()
+		if len(r.out) != first || (len(in) > 0 && first == 0) {
+			t.Errorf("% x: %d events after the first Close, %d after the second: %v", in, first, len(r.out), r.out)
+		}
+	}
+}

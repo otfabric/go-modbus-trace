@@ -33,6 +33,19 @@ type Options struct {
 }
 
 // Sink receives events in order of determination. An error stops the pass.
+//
+// Event is called synchronously on the goroutine that runs the pass, one
+// call at a time: a sink needs no locking of its own, and a slow sink only
+// slows the pass down. The event and everything it points to belong to the
+// sink from the call on: the library neither reads nor changes them
+// afterwards, so a sink may keep them and may change them. A sink may call
+// File.Frames and start other passes on the same File.
+//
+// Event must return normally. A call that does not is contained like the
+// decoding of a packet that does not: it is counted and listed in
+// FileSummary.InternalErrors, what that packet still had to deliver may be
+// lost, and the pass goes on and returns no error for it. To stop a pass,
+// return an error.
 type Sink interface {
 	Event(e *model.Event) error
 }
@@ -52,8 +65,21 @@ const maxQueued = 64
 // and notes, in order of determination. Consumers sort transactions by
 // their request time. It returns the file summary, with the transaction
 // counters.
+//
+// What Analyze holds does not grow with the size of the trace: it keeps
+// nothing of a connection that closed, and what open connections hold is
+// bounded by Limits (MaxConns, the reassembly buffers, AnalysisBudget) and
+// MaxOutstanding.
+//
+// A damaged file ends the pass with the events and the summary so far and an
+// error wrapping ErrCorrupt, as for Scan.
 func Analyze(ctx context.Context, f *File, o Options, sink Sink) (*FileSummary, error) {
-	an := &analysis{o: o, sink: sink, status: map[string]uint64{}, flags: map[string]uint64{}}
+	an := &analysis{o: o, sink: sink, status: map[string]uint64{}, flags: map[string]uint64{},
+		budget: o.Limits.withDefaults().AnalysisBudget}
+	for k := range an.lists {
+		l := &an.lists[k]
+		l.links[k].prev, l.links[k].next = l, l
+	}
 	if o.Flows != nil {
 		an.flows = map[uint32]bool{}
 		for _, id := range o.Flows {
@@ -80,6 +106,89 @@ type analysis struct {
 	err    error
 	status map[string]uint64
 	flags  map[string]uint64
+	// What the connections hold between packets, charged against
+	// Limits.AnalysisBudget (see shed).
+	budget int
+	held   int      // bytes charged over all connections
+	lists  [2]aconn // per kind of state: the list of the connections that hold some, most recently charged first (sentinels)
+	freed  uint64   // times the budget freed state
+}
+
+// Kinds of state a connection holds between packets.
+const (
+	heldADUs   = iota // ADUs not emitted yet, and gaps and resyncs held with them: a decision frees them
+	heldChunks        // where the bytes being framed came from: freed with the connection
+)
+
+// What each item is charged, in bytes: estimates from above of the heap
+// behind it, so the budget bounds the memory and not only a count.
+const (
+	costADU   = 512 // an ADU not emitted yet: the ADU, its place in a transaction, the fixed part of its decoded view
+	costByte  = 96  // per PDU byte: the copy, and the decoded fields with their text at their densest
+	costRef   = 96  // a frame reference with its time
+	costChunk = 64  // a chunk
+	costHeld  = 160 // a gap or a resync held while the roles are undecided
+)
+
+// charge adds n bytes of state of kind k to the connection, which becomes
+// the most recently charged of its kind.
+func (an *analysis) charge(a *aconn, k, n int) {
+	an.held += n
+	a.held[k] += n
+	l := &an.lists[k]
+	if l.links[k].next == a {
+		return
+	}
+	an.unlink(a, k)
+	x := &a.links[k]
+	x.prev, x.next = l, l.links[k].next
+	x.next.links[k].prev = a
+	l.links[k].next = a
+}
+
+// release takes n bytes of state of kind k off the connection.
+func (an *analysis) release(a *aconn, k, n int) {
+	an.held -= n
+	a.held[k] -= n
+	if a.held[k] == 0 {
+		an.unlink(a, k)
+	}
+}
+
+func (an *analysis) unlink(a *aconn, k int) {
+	if x := &a.links[k]; x.next != nil {
+		x.prev.links[k].next, x.next.links[k].prev = x.next, x.prev
+		x.prev, x.next = nil, nil
+	}
+}
+
+// shed frees state until what the connections hold fits the budget again.
+// It runs between two packets. The connection whose ADUs were added to
+// least recently goes first: its roles are decided with what there is, then
+// its oldest outstanding request is decided unanswered and uncertain, one at
+// a time. When no connection holds an ADU any more and the chunks alone are
+// over the budget, the connection whose chunks were added to least recently
+// is closed as evicted: the partly framed bytes it holds cannot be given up
+// without their provenance.
+func (an *analysis) shed(tr *flow.Tracker) {
+	for an.held > an.budget {
+		if a := an.lists[heldADUs].links[heldADUs].prev; a != &an.lists[heldADUs] {
+			an.freed++
+			switch {
+			case !a.decided:
+				a.decideNow()
+			case !a.pair.PushOut():
+				tr.Evict(a.c) // cannot be: a decided connection's unemitted ADUs are outstanding requests
+			}
+			continue
+		}
+		a := an.lists[heldChunks].links[heldChunks].prev
+		if a == &an.lists[heldChunks] {
+			return
+		}
+		an.freed++
+		tr.Evict(a.c)
+	}
 }
 
 func (an *analysis) emit(e *model.Event) {
@@ -91,10 +200,17 @@ func (an *analysis) emit(e *model.Event) {
 	an.err = an.sink.Event(e)
 }
 
+// framerWindow is how far back from the end of the delivered bytes a framer
+// can still hold unframed ones: an incomplete ADU, or one waiting for the
+// header that follows it. What lies further back was framed or passed over.
+const framerWindow = mbtcp.MaxADU + mbtcp.HeaderLen
+
 // aconn is the analysis state of one connection.
 type aconn struct {
 	an      *analysis
 	c       *flow.Conn
+	held    [2]int                         // bytes charged, per kind of state
+	links   [2]struct{ prev, next *aconn } // the analysis's lists of holders
 	decided bool
 	server  int // direction index of the server's packets; -1: unknown
 	role    mbtcp.Role
@@ -121,6 +237,7 @@ type chunk struct {
 type unsent struct {
 	pos, end uint64
 	adu      *model.ADU
+	cost     int // charged while it is here
 }
 
 type queued struct {
@@ -128,6 +245,7 @@ type queued struct {
 	adu    *model.ADU
 	pdu    []byte
 	flags  mbtcp.Flags
+	ahead  bool // see aconn.adu
 	gap    *model.Gap
 	resync *model.Resync
 }
@@ -192,6 +310,9 @@ func (a *aconn) start(r mbtcp.Role) {
 	q := a.queue
 	a.queue, a.samples = nil, [2][]mbtcp.Sample{}
 	for _, x := range q {
+		if x.adu == nil {
+			a.an.release(a, heldADUs, costHeld)
+		}
 		switch {
 		case x.gap != nil:
 			a.gapEvent(x.dir, x.gap)
@@ -199,7 +320,7 @@ func (a *aconn) start(r mbtcp.Role) {
 			x.resync.Dir = a.dirName(x.dir)
 			a.an.emit(&model.Event{Kind: model.KindResync, Resync: x.resync})
 		default:
-			a.handle(x.dir, x.adu, x.pdu, x.flags)
+			a.handle(x.dir, x.adu, x.pdu, x.flags, x.ahead)
 		}
 	}
 }
@@ -210,13 +331,16 @@ func (a *aconn) decideNow() {
 	}
 }
 
-// data records where the direction's bytes came from.
+// data records where the direction's bytes came from. The chunks of bytes
+// the framer cannot hold any more (it passed over them without framing an
+// ADU: a resync scan) are dropped first, so a direction keeps the chunks of
+// at most framerWindow bytes and of the segment being written.
 func (a *aconn) data(d int, pos uint64, n int, ch flow.Chunk) {
-	cs := append(a.chunks[d], chunk{pos, n, ch})
-	if len(cs) > 4096 { // the framer consumes in order; this only guards odd streams
-		cs = append(cs[:0], cs[len(cs)-2048:]...)
+	if pos > framerWindow {
+		a.consume(d, pos-framerWindow)
 	}
-	a.chunks[d] = cs
+	a.chunks[d] = append(a.chunks[d], chunk{pos, n, ch})
+	a.an.charge(a, heldChunks, costChunk)
 }
 
 // repeat records that the direction's bytes [pos, end) were seen again. It
@@ -239,6 +363,7 @@ func (a *aconn) settled(m *model.ADU) {
 	}
 	for d := range a.unsent {
 		if i := slices.IndexFunc(a.unsent[d], func(u unsent) bool { return u.adu == m }); i >= 0 {
+			a.an.release(a, heldADUs, a.unsent[d][i].cost)
 			a.unsent[d] = slices.Delete(a.unsent[d], i, i+1)
 			return
 		}
@@ -254,6 +379,7 @@ func (a *aconn) consume(d int, pos uint64) {
 	}
 	if i > 0 {
 		a.chunks[d] = append(cs[:0], cs[i:]...)
+		a.an.release(a, heldChunks, i*costChunk)
 	}
 }
 
@@ -306,25 +432,34 @@ func (a *aconn) adu(d int, f *mbtcp.ADU) {
 	if ooo {
 		m.Flags = append(m.Flags, model.FlagOutOfOrder)
 	}
-	a.unsent[d] = append(a.unsent[d], unsent{f.Pos, f.Pos + uint64(f.Size), m})
+	cost := costADU + costByte*len(f.PDU) + costRef*len(refs)
+	a.unsent[d] = append(a.unsent[d], unsent{f.Pos, f.Pos + uint64(f.Size), m, cost})
+	a.an.charge(a, heldADUs, cost)
 	pdu := append([]byte(nil), f.PDU...)
+	// The packet that carried this ADU (or an earlier one of its sender)
+	// acknowledged bytes of the other direction that the capture has not
+	// delivered: for a response, the request direction has a hole now,
+	// whether or not a gap is declared for it later.
+	ahead := a.c.AckedAhead(1 - d)
 	if !a.decided {
 		if f.Flags&(mbtcp.Foreign|mbtcp.Truncated) == 0 && len(pdu) > 0 && len(a.samples[d]) < mbtcp.MaxSamples {
 			a.order++
 			a.samples[d] = append(a.samples[d], mbtcp.NewSample(a.order, f.TID, f.Unit, pdu))
 		}
-		a.queue = append(a.queue, queued{dir: d, adu: m, pdu: pdu, flags: f.Flags})
+		a.queue = append(a.queue, queued{dir: d, adu: m, pdu: pdu, flags: f.Flags, ahead: ahead})
 		a.queued[d]++
 		if (len(a.samples[0]) >= mbtcp.MaxSamples && len(a.samples[1]) >= mbtcp.MaxSamples) || a.queued[d] >= maxQueued {
 			a.decideNow()
 		}
 		return
 	}
-	a.handle(d, m, pdu, f.Flags)
+	a.handle(d, m, pdu, f.Flags, ahead)
 }
 
-// handle decodes and pairs one ADU once the roles are known.
-func (a *aconn) handle(d int, m *model.ADU, pdu []byte, fl mbtcp.Flags) {
+// handle decodes and pairs one ADU once the roles are known. ahead: when
+// the ADU was framed, the request direction had bytes its peer acknowledged
+// and the capture did not deliver.
+func (a *aconn) handle(d int, m *model.ADU, pdu []byte, fl mbtcp.Flags, ahead bool) {
 	if fl&mbtcp.Resynced != 0 {
 		m.Flags = append(m.Flags, model.FlagResynced)
 	}
@@ -357,6 +492,9 @@ func (a *aconn) handle(d int, m *model.ADU, pdu []byte, fl mbtcp.Flags) {
 	case request:
 		a.pair.Request(p)
 	default:
+		if ahead {
+			a.pair.RequestGap()
+		}
 		a.pair.Response(p)
 	}
 }
@@ -365,6 +503,7 @@ func (a *aconn) gap(d int, pos uint64, n int64, reason string) {
 	g := &model.Gap{Conn: a.c.ID, Pos: pos, Bytes: n, Reason: reason}
 	if !a.decided {
 		a.queue = append(a.queue, queued{dir: d, gap: g})
+		a.an.charge(a, heldADUs, costHeld)
 		return
 	}
 	a.gapEvent(d, g)
@@ -374,8 +513,12 @@ func (a *aconn) gapEvent(d int, g *model.Gap) {
 	g.Dir = a.dirName(d)
 	if g.Reason != flow.GapSnaplen.String() {
 		a.gapNext[d] = true
-		if d == a.server {
+		switch {
+		case a.server < 0: // nothing is paired
+		case d == a.server:
 			a.pair.ResponseGap()
+		default:
+			a.pair.RequestGap()
 		}
 	}
 	a.an.emit(&model.Event{Kind: model.KindGap, Gap: g})
@@ -385,6 +528,7 @@ func (a *aconn) resync(d int, pos uint64, skipped int, c mbtcp.Confidence) {
 	r := &model.Resync{Conn: a.c.ID, Pos: pos, Skipped: skipped, Confidence: c.String()}
 	if !a.decided {
 		a.queue = append(a.queue, queued{dir: d, resync: r})
+		a.an.charge(a, heldADUs, costHeld)
 		return
 	}
 	r.Dir = a.dirName(d)
@@ -417,6 +561,11 @@ func (a *aconn) txn(t *model.Transaction) {
 func (a *aconn) close() {
 	a.decideNow()
 	a.pair.Close(a.c.Close == flow.CloseEvict)
+	// Everything is emitted: nothing of this connection is held any more.
+	a.chunks = [2][]chunk{}
+	for k := range a.held {
+		a.an.release(a, k, a.held[k])
+	}
 	c := a.c
 	info := *a.info
 	info.Close = c.Close.String()

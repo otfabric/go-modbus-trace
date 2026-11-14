@@ -41,10 +41,13 @@ type FileSummary struct {
 	// error.
 	TSOSegments uint64 `json:"tso_segments"`
 	// InternalErrors are recovered panics, the first 100 of
-	// InternalErrorCount; a non-zero count is a bug worth reporting.
+	// InternalErrorCount; a non-zero count is a bug worth reporting: in the
+	// library, or in the caller's Sink when it was a call of the sink that
+	// did not return normally.
 	InternalErrors     []InternalError `json:"internal_errors,omitempty"`
 	InternalErrorCount uint64          `json:"internal_error_count,omitempty"`
-	// Error is set when the read ended early on a damaged file.
+	// Error is set when the read ended early on a damaged file: the text
+	// of the error the pass returned (it wraps ErrCorrupt).
 	Error string `json:"error,omitempty"`
 	// Transactions and TransactionFlags count the transactions by status
 	// and by quality flag (Analyze only).
@@ -103,21 +106,30 @@ type Fragments struct {
 // ReaderCounters report what the file reader skipped or tolerated.
 type ReaderCounters struct {
 	SimplePackets uint64 `json:"simple_packets"` // no timestamp: used for flow state, never for timing
-	SkippedBlocks uint64 `json:"skipped_blocks"` // damaged pcapng blocks with a plausible length
+	SkippedBlocks uint64 `json:"skipped_blocks"` // pcapng blocks skipped: damaged ones with a plausible length, interface blocks past Limits.MaxInterfaces, and packets that name no interface kept
 	UnknownBlocks uint64 `json:"unknown_blocks"`
-	BadOptions    uint64 `json:"bad_options"`  // pcapng option areas that did not parse (ignored), or an invalid if_tsresol
+	BadOptions    uint64 `json:"bad_options"`  // pcapng option areas that did not parse (ignored), an invalid if_tsresol, or option text past the 16 MiB kept per input
 	OtherFrames   uint64 `json:"other_frames"` // custom and journal blocks Wireshark numbers as frames
 	TruncatedTail bool   `json:"truncated_tail"`
+	// BadTimestamps counts pcapng packets whose time, with the interface's
+	// resolution and offset, does not fit in 64-bit nanoseconds (before
+	// 1677 or after 2262). They are read without a time, like simple
+	// packets: used for flow state, never for timing.
+	BadTimestamps uint64 `json:"bad_timestamps"`
 }
 
 // ConnCounters report connection tracking.
 type ConnCounters struct {
 	Total      uint64 `json:"total"`               // connection epochs
 	Midstream  uint64 `json:"midstream"`           // without a captured handshake
-	Evicted    uint64 `json:"evicted"`             // dropped from a full table (Limits.MaxConns), least recently seen first
+	Evicted    uint64 `json:"evicted"`             // dropped from a full table (Limits.MaxConns), least recently seen first, or closed by Limits.AnalysisBudget
 	Superseded uint64 `json:"superseded"`          // ended by a new epoch of the same 4-tuple
 	MaxTracked int    `json:"max_tracked"`         // most connections tracked at once
 	AfterClose uint64 `json:"packets_after_close"` // packets of a connection after its FIN or RST (final ACKs)
+	// FlowsDropped counts the connections that are not in the flow list
+	// Scan returned because it was full (Limits.MaxFlows); 0 for Analyze,
+	// which keeps no list.
+	FlowsDropped uint64 `json:"flows_dropped"`
 }
 
 // Quality counts TCP and framing conditions over the trace.
@@ -131,6 +143,7 @@ type Quality struct {
 	GapBytes           uint64 `json:"gap_bytes"`           // bytes in those holes, where the sequence numbers tell
 	ReassemblyOverflow uint64 `json:"reassembly_overflow"` // gaps declared by Limits.BufferPerDir
 	ReassemblyBudget   uint64 `json:"reassembly_budget"`   // gaps declared by Limits.BufferTotal
+	AnalysisBudget     uint64 `json:"analysis_budget"`     // times Limits.AnalysisBudget freed state: roles decided early, a request decided unanswered and uncertain, a connection closed as evicted
 	Resyncs            uint64 `json:"resyncs"`             // framing resynchronisations
 	ResyncFailed       uint64 `json:"resync_failed"`       // resyncs that found no header within Limits.ResyncScan
 	JunkBytes          uint64 `json:"junk_bytes"`          // bytes of TCP payload that framed as nothing
@@ -139,7 +152,8 @@ type Quality struct {
 }
 
 // InternalError is a recovered panic while decoding one packet (Frame 0:
-// while flushing at the end of the trace).
+// while flushing at the end of the trace); a Sink call for that packet that
+// did not return normally is recorded the same way.
 type InternalError struct {
 	Frame   uint64 `json:"frame"` // within the input being read when it happened
 	Message string `json:"message"`
