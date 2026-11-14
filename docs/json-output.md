@@ -21,10 +21,10 @@ output of every command against its schema.
       "snaplen": {"max": 65535, "truncated_packets": 0, "payload_bytes_cut": 0},
       "unsupported": {},
       "fragments": {"reassembled": 0, "dropped": 0, "incomplete": 0},
-      "reader": {"simple_packets": 0, "skipped_blocks": 0, "unknown_blocks": 0, "other_frames": 0, "truncated_tail": false},
-      "connections": {"total": 64, "midstream": 8, "evicted": 0, "superseded": 0, "max_tracked": 64, "packets_after_close": 0},
+      "reader": {"simple_packets": 0, "skipped_blocks": 0, "unknown_blocks": 0, "other_frames": 0, "truncated_tail": false, "bad_timestamps": 0},
+      "connections": {"total": 64, "midstream": 8, "evicted": 0, "superseded": 0, "max_tracked": 64, "packets_after_close": 0, "flows_dropped": 0},
       "quality": {"retransmitted": 575, "out_of_order": 192, "overlap_conflict": 192, "keepalives": 0, "syn_retransmits": 0,
-                  "gaps": 192, "gap_bytes": 49728, "reassembly_overflow": 0, "reassembly_budget": 0, "resyncs": 192,
+                  "gaps": 192, "gap_bytes": 49728, "reassembly_overflow": 0, "reassembly_budget": 0, "analysis_budget": 0, "resyncs": 192,
                   "resync_failed": 0, "junk_bytes": 0, "foreign_protocol": 0, "snaplen_truncated": 0},
       "time_backwards": 0,
       "tso_segments": 0
