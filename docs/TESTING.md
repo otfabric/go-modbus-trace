@@ -32,7 +32,7 @@ Build this first (L1); everything else depends on it. It is exported so the appl
 
 ## 3. Fuzz targets
 
-`FuzzPcapReader`, `FuzzPcapngReader`, `FuzzLinkIPTCP`, `FuzzFramer`, `FuzzDecodeRequest`, `FuzzDecodeResponse`, `FuzzPipeline` (random bytes wrapped as a pcap with plausible headers so the fuzzer gets past the first parser). Properties: no panic, termination, and for the pipeline: no recovered panic, every connection opened is closed, and every ADU's provenance refers to packets that exist and whose payload bytes are the ADU (checked through `File.Frames`). Memory bounds are tested by the hostile-input tests of `internal/flow` and `internal/link` (empty and one-byte held segments, a million tiny fragments) and by the soak run. CI runs the seed corpus on every push and a time-boxed run (30 s per target) on pull requests; a longer scheduled run is optional.
+`FuzzPcapReader`, `FuzzPcapngReader`, `FuzzLinkIPTCP`, `FuzzFramer`, `FuzzDecodeRequest`, `FuzzDecodeResponse`, `FuzzPipeline` (random bytes wrapped as a pcap with plausible headers so the fuzzer gets past the first parser). Properties: no panic, termination, and for the pipeline: no recovered panic, every connection opened is closed, and every ADU's provenance refers to packets that exist and whose payload bytes are the ADU (checked through `File.Frames`). Memory bounds are tested by the hostile-input tests of `internal/flow` and `internal/link` (empty and one-byte held segments, a million tiny fragments) and by the soak run. CI runs the seed corpus on every pull request and a time-boxed run (30 s per target) on pull requests; a longer scheduled run is optional.
 
 ## 4. Oracle: Wireshark's dissector
 
@@ -59,3 +59,15 @@ LA10 scripts a client polling holding registers, coils and a paged FC43 identity
 - A new quality condition, a new reason code or a new flag comes with a synthetic scenario that produces it.
 - Golden files are regenerated only by an explicit `make golden` and reviewed in the diff.
 - Benchmarks and numbers in `ARCHITECTURE.md` section 12 name the machine and commit they were measured on.
+
+## When CI runs
+
+| Event | Workflow | What runs |
+|---|---|---|
+| Pull request | `pr.yml` | `docs.yml` (docsync, otfabric-policy) always; `ci.yml` unless every changed file is documentation; then `OT Fabric Required Checks` |
+| Push to a branch | none | nothing; dispatch `ci.yml` to test a branch without a pull request |
+| Push to `main` | `docs.yml` | the light checks; the merged commit was tested as the pull request's merge commit |
+| Schedule | `nightly.yml` | the scheduled runs, on `main` |
+| Release | `release.yml` | the release workflow tests the release commit again |
+
+Documentation means an added or modified `*.md` file outside `.github/`, `testdata/` and `vendor/`, other than `AGENTS.md` and `CLAUDE.md`, and other than `docs/COVERAGE.md`, which code reads. A deleted or renamed document, or any other file, runs everything. `OT Fabric Required Checks` fails unless every job that applies succeeded; its summary lists them.

@@ -1,13 +1,11 @@
+# Called by pr.yml on every pull request that is not documentation only;
+# dispatch it to run it on a branch without a pull request.
 name: CI
 run-name: "CI (${{ github.event_name }}) on ${{ github.ref_name }} by @${{ github.actor }}"
 
 on:
-  push:
-    branches: ["**"]
-    paths-ignore: ["**/*.md"]
-  pull_request:
-    branches: ["**"]
-    paths-ignore: ["**/*.md"]
+  workflow_call:
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -20,8 +18,10 @@ permissions:
 jobs:
   # Organisation checks: format, lint, vet, vulnerabilities, race tests, coverage.
   ci:
-    uses: otfabric/.github/.github/workflows/go-ci.yml@v3.3.0
+    uses: otfabric/.github/.github/workflows/go-ci.yml@v3.8.0
     with:
+      # otfabric-policy runs in docs.yml, on every pull request and push to main.
+      run-policy: false
       run-govulncheck: true
       coverage-min: "90"
       # The CLI's tests exercise the library, and codecov.yml measures the same way.
@@ -31,19 +31,19 @@ jobs:
       test-exclude-regex: "/example(s)?($|/)"
       codecov-name: go-modbus-trace
       go-versions: '["1.26", "1.27"]'
-      policy-version: v1.4.2
     secrets: inherit
 
   # The CLI is a nested module (ADR-0009).
   cli:
-    uses: otfabric/.github/.github/workflows/go-ci.yml@v3.3.0
+    uses: otfabric/.github/.github/workflows/go-ci.yml@v3.8.0
     with:
+      # otfabric-policy runs in docs.yml, on every pull request and push to main.
+      run-policy: false
       module-dir: cmd/mbtracectl
       coverage-min: "90"
       test-exclude-regex: "/example(s)?($|/)"
       run-codecov: false
       go-versions: '["1.26", "1.27"]'
-      policy-version: v1.4.2
     secrets: inherit
 
   # Every target of REQUIREMENTS.md "Programs" builds and tests with

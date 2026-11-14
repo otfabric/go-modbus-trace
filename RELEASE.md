@@ -1,5 +1,22 @@
 # go-modbus-trace Releases
 
+## v0.8.5
+
+**Date:** 2026-11-14
+**Previous release:** v0.8.4
+
+No API change.
+
+### Changed
+
+- `export/mbcapexport` is built on go-modbus-capture v0.2.1 (was v0.1.0). The MBCAP library API it uses is unchanged.
+- Tests use go-modbus v1.15.1 (was v1.15.0); the library does not import it outside tests.
+- `mbtracectl` is built on go-modbus-trace v0.8.4 (was v0.8.2) and go-modbus-capture v0.2.1 (was v0.2.0).
+- An MBCAP export names the libraries it was built with in its header, so the hashes of the four export outputs in `testdata/plant.outputs.json` are regenerated (`make golden`). The exported records are identical.
+- CI: otfabric/engineering policy 1.6 and the shared workflows v3.8.0. Releases now run the API compatibility gate before tagging.
+
+---
+
 ## v0.8.4
 
 **Date:** 2026-11-13
