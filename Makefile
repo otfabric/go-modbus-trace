@@ -50,7 +50,7 @@ MBCAPCTL_VERSION  = v0.0.2
 MODBUSCTL_VERSION = v0.0.0-20261015074520-c75d3676a93c
 
 # docsync release of docs-check (DOC-008).
-DOCSYNC_VERSION := v0.3.1
+DOCSYNC_VERSION := v0.4.0
 
 # Size of the generated stream in `make soak`, GiB.
 SOAK_GIB ?= 5
