@@ -1,5 +1,18 @@
 # go-modbus-trace Releases
 
+## v0.9.2
+
+**Date:** 2026-11-16
+**Previous release:** v0.9.1
+
+No library code changes.
+
+### Changed
+
+- Built on go-modbus v1.16.2 (was v1.16.1) and go-serial v0.5.0 (was v0.4.1) (go-modbus RELEASE.md, v1.16.2; go-serial RELEASE.md, v0.5.0).
+
+---
+
 ## v0.9.1
 
 **Date:** 2026-11-15
