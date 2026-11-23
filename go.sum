@@ -1,7 +1,7 @@
 github.com/dlclark/regexp2 v1.11.0 h1:G/nrcoOa7ZXlpoa/91N3X7mM3r8eIlMBBJZvsz/mxKI=
 github.com/dlclark/regexp2 v1.11.0/go.mod h1:DHkYz0B9wPfa6wondMfaivmHpzrQ3v9q8cnmRbL6yW8=
-github.com/otfabric/go-modbus v1.22.0 h1:mO5ZG7BE+JQbRVjC4lwrWt8CvbBAn7QYanSi/QW+NLE=
-github.com/otfabric/go-modbus v1.22.0/go.mod h1:vPP3e6BiL8H/jwlK90htH7HLHduWhiEHx7M46QTeMcw=
+github.com/otfabric/go-modbus v1.23.0 h1:ErZe1E0/77N7D862eiS28US99hW5MIAAmIOgPCF/0KY=
+github.com/otfabric/go-modbus v1.23.0/go.mod h1:vPP3e6BiL8H/jwlK90htH7HLHduWhiEHx7M46QTeMcw=
 github.com/otfabric/go-modbus-capture v0.2.2 h1:5NiarHpn5gr+97yEuR7Hcks6YPiydpx68l1i6j/9pZg=
 github.com/otfabric/go-modbus-capture v0.2.2/go.mod h1:z+1rnvMln/8Ra4lSzbekw4pybZroJuBf8GPXqCHY8qs=
 github.com/otfabric/go-serial v0.5.0 h1:hbKs9n/XLa7NnFlG3ftoNRIBsRkeS9NTO2tbqOyS1O4=
