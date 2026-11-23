@@ -1,5 +1,18 @@
 # go-modbus-trace Releases
 
+## v0.9.4
+
+**Date:** 2026-11-23
+**Previous release:** v0.9.3
+
+No library code changes.
+
+### Changed
+
+- Tests use go-modbus v1.22.0 (was v1.17.0) (go-modbus RELEASE.md, v1.18.0..v1.22.0). The library does not import go-modbus outside tests. The go-modbus round trip in `trace/gomodbus_test.go` (FC08 return query data and clear counters, FC11, FC12, FC43/14 among others) passes unchanged against v1.20.0's stricter client and server checks.
+
+---
+
 ## v0.9.3
 
 **Date:** 2026-11-16
